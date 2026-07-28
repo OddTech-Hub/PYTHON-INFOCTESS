@@ -1,0 +1,46 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+<a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+&rsaquo; <a href="{% url 'admin:app_list' app_label='accounts' %}">Accounts</a>
+&rsaquo; <a href="{% url 'admin:accounts_user_changelist' %}">Users</a>
+&rsaquo; Import CSV
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    <div class="module" style="padding: 20px;">
+        <h2 style="margin-bottom: 20px;">Upload CSV File</h2>
+        <form action="." method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+            
+            {% if form.errors %}
+                <p class="errornote">Please correct the errors below.</p>
+            {% endif %}
+            
+            <div style="margin-bottom: 20px;">
+                <label for="id_csv_file" style="display: block; font-weight: bold; margin-bottom: 8px;">Select CSV file:</label>
+                {{ form.csv_file }}
+            </div>
+            
+            <div style="margin-bottom: 20px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 6px; font-size: 13px; color: #475569;">
+                <p style="margin-top: 0; font-weight: bold;">CSV Requirements & Formatting:</p>
+                <ul style="margin-bottom: 0; padding-left: 20px;">
+                    <li>CSV file must include these headers: <strong>email, password, first_name, last_name, role</strong>.</li>
+                    <li>Optional column: <strong>level_id</strong> (e.g., <code>L100</code>, <code>L200</code>, <code>L300</code>, <code>L400</code>).</li>
+                    <li>For <strong>course reps</strong>, set <code>role</code> to <code>course_rep</code> (they will be created with their email as index number and password as PIN).</li>
+                    <li>For <strong>lecturers</strong>, set <code>role</code> to <code>lecturer</code>.</li>
+                </ul>
+            </div>
+            
+            <div class="submit-row" style="margin: 0; padding: 0; background: none; border: none; text-align: left;">
+                <input type="submit" value="Upload and Import" class="default" style="float: none; height: 35px; padding: 0 20px;" />
+                <a href="{% url 'admin:accounts_user_changelist' %}" style="display: inline-block; vertical-align: middle; margin-left: 15px; line-height: 35px;">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
