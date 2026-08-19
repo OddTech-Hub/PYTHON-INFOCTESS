@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual Environment
+.venv/
+venv/
+
+# Environment Variables (NEVER commit this!)
+.env
+.env.local
+.env.production
+
+# Database (contains real data!)
+db.sqlite3
+
+# Collected static files
+staticfiles/
+
+# Django cache
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
