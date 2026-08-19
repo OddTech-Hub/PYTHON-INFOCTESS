@@ -143,11 +143,18 @@ SIMPLE_JWT = {
     'USER_ID_CLAIM': 'user_id',
 }
 
-# CORS Settings
+# CORS & CSRF Settings
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+
+raw_csrf_origins = config(
+    'CSRF_TRUSTED_ORIGINS',
+    default='https://*.up.railway.app,https://*.vercel.app,http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000'
+)
+CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in raw_csrf_origins.split(',') if origin.strip()]
 
 # Frontend Landing Page Configuration
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
 LOGOUT_REDIRECT_URL = FRONTEND_URL
+
 
