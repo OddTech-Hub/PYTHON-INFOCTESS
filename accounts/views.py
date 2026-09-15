@@ -160,6 +160,43 @@ class UserLogoutView(APIView):
         })
 
 
+class ChangePasswordView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        new_password = request.data.get('new_password', '').strip()
+        confirm_password = request.data.get('confirm_password', '').strip()
+
+        if not new_password:
+            return Response({
+                'success': False,
+                'message': 'New password is required.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if len(new_password) < 6:
+            return Response({
+                'success': False,
+                'message': 'Password must be at least 6 characters long.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if confirm_password and new_password != confirm_password:
+            return Response({
+                'success': False,
+                'message': 'Passwords do not match.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+        user.set_password(new_password)
+        user.must_change_password = False
+        user.save()
+
+        return Response({
+            'success': True,
+            'message': 'Password updated successfully.',
+            'data': UserSerializer(user).data
+        })
+
+
 class AdminUserDeleteView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
@@ -176,3 +213,4 @@ class AdminUserDeleteView(APIView):
                 'success': False,
                 'message': 'User not found.'
             }, status=status.HTTP_404_NOT_FOUND)
+

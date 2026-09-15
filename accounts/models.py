@@ -41,6 +41,10 @@ class User(AbstractUser):
         null=True,
         related_name='students'
     )
+    must_change_password = models.BooleanField(
+        default=True,
+        help_text="Designates whether the user must change their password upon next login."
+    )
 
     def save(self, *args, **kwargs):
         # Normalize email to lowercase

@@ -55,38 +55,49 @@ class CustomUserAdmin(UserAdmin):
                     if not row_data:
                         continue
                     row = dict(zip(headers, [v.strip() for v in row_data]))
-                    email = row.get('email')
-                    password = row.get('password')
+                    email = row.get('email', '')
+                    password = row.get('password', 'infoctess123') or 'infoctess123'
                     first_name = row.get('first_name', '')
                     last_name = row.get('last_name', '')
-                    role = row.get('role', 'lecturer')
+                    role = row.get('role', 'student').lower()
+                    index_number = row.get('index_number', '') or row.get('index', '')
                     level_id = row.get('level_id', 'L100')
 
-                    if not email or not password:
+                    if not email and index_number:
+                        email = f"{index_number}@st.uew.edu.gh"
+
+                    if not email:
                         error_count += 1
                         continue
 
                     # Check if already exists
-                    if User.objects.filter(email=email).exists() or User.objects.filter(username=email).exists():
+                    if User.objects.filter(email__iexact=email).exists() or User.objects.filter(username__iexact=email).exists():
                         error_count += 1
                         continue
 
                     try:
-                        db_role = User.Role.REP if role in ['course_rep', 'rep'] else User.Role.LECTURER
+                        if role in ['course_rep', 'rep']:
+                            db_role = User.Role.REP
+                        elif role in ['lecturer', 'faculty']:
+                            db_role = User.Role.LECTURER
+                        else:
+                            db_role = User.Role.STUDENT
+
                         user = User(
                             email=email,
                             username=email,
                             first_name=first_name,
                             last_name=last_name,
-                            role=db_role
+                            index_number=index_number if index_number else None,
+                            role=db_role,
+                            must_change_password=True
                         )
                         user.set_password(password)
 
-                        if db_role == User.Role.REP:
-                            from courses.models import StudentGroup
-                            group = StudentGroup.objects.filter(level__code=level_id).first()
-                            if group:
-                                user.group = group
+                        from courses.models import StudentGroup
+                        group = StudentGroup.objects.filter(level__code=level_id).first()
+                        if group:
+                            user.group = group
 
                         user.save()
                         success_count += 1
