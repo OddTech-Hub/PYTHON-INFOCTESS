@@ -1,0 +1,1015 @@
+[
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$AlXZ0yRi62R8VJfaghtwoi$GwuQ8rpnqNX58IKx/pSZ/+vGI2axJUGsO5/3p5CRidk=",
+    "last_login": "2026-09-21T21:06:10.719Z",
+    "is_superuser": true,
+    "username": "admin@infoctess.edu",
+    "first_name": "System",
+    "last_name": "Admin",
+    "email": "admin@infoctess.edu",
+    "is_staff": true,
+    "is_active": true,
+    "date_joined": "2026-07-19T17:55:17.067Z",
+    "role": "lecturer",
+    "index_number": null,
+    "pin": null,
+    "device_id": null,
+    "device_name": null,
+    "group": null,
+    "must_change_password": false,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$DG6s4Kl5U8T8GsCeC0Ketz$TawkO/j4kkj0/NLSX9HlaxAJ7p264cZO/aZdi8/MLoU=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "lecturer@infoctess.edu",
+    "first_name": "Isaac",
+    "last_name": "Koomson",
+    "email": "lecturer@infoctess.edu",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:09.701Z",
+    "role": "lecturer",
+    "index_number": null,
+    "pin": null,
+    "device_id": null,
+    "device_name": null,
+    "group": null,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$PJ1UkqvAEhrhC1OLuaI8Hq$oLbFbpv/0z9DUi5HlDwl0cSJns7X9Fz63vZc8twNUEE=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "danso@uew.edu.gh",
+    "first_name": "Dr.",
+    "last_name": "Danso",
+    "email": "danso@uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:11.237Z",
+    "role": "lecturer",
+    "index_number": null,
+    "pin": null,
+    "device_id": null,
+    "device_name": null,
+    "group": null,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$3ORatBiImKNm5FRdVUbput$ICz9jzycnkRVLhCRackc7qKhpYzlTvucb+n+JxAHgVg=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5261000018@st.uew.edu.gh",
+    "first_name": "Alberta",
+    "last_name": "Klokpa",
+    "email": "5261000018@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:14.513Z",
+    "role": "rep",
+    "index_number": "5261000018",
+    "pin": null,
+    "device_id": "dev-001",
+    "device_name": "iPhone 13",
+    "group": 81,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$Z1hGXiPkCFevR0zMkdCszf$bmJWFaXK0nd6lMESdTzXMTdkNufQABVkDLY/fmIKGjQ=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5261000667@st.uew.edu.gh",
+    "first_name": "Daniel",
+    "last_name": "Amoh",
+    "email": "5261000667@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:16.205Z",
+    "role": "student",
+    "index_number": "5261000667",
+    "pin": null,
+    "device_id": "dev-002",
+    "device_name": "Samsung S21",
+    "group": 81,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$RBL1J1329HEJEBUC2zpdTK$D6pnpOtCe+fNXpK4j0z9mm+WuY6go6NsG1ZR14kfdBU=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5261000215@st.uew.edu.gh",
+    "first_name": "Emmanuel",
+    "last_name": "Oduro",
+    "email": "5261000215@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:17.869Z",
+    "role": "student",
+    "index_number": "5261000215",
+    "pin": null,
+    "device_id": "dev-003",
+    "device_name": "Pixel 7",
+    "group": 82,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$uHTFTE6HBLqEXKqOZQY7Dd$AKe7PeBQedpRpm/ClNo4UbsV9fW1EASwfzLEBGvENs0=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5261000267@st.uew.edu.gh",
+    "first_name": "Emmanuel",
+    "last_name": "Twumasi",
+    "email": "5261000267@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:19.535Z",
+    "role": "student",
+    "index_number": "5261000267",
+    "pin": null,
+    "device_id": null,
+    "device_name": "Multiple (2)",
+    "group": 82,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$eidYoprTCIAAi5MRaGu0c3$5jLzpTBTfg1LtfIswOaKU5+x9O6Cs0k/J8e/1rld7ZY=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5261000323@st.uew.edu.gh",
+    "first_name": "Heis",
+    "last_name": "Boateng",
+    "email": "5261000323@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:21.028Z",
+    "role": "rep",
+    "index_number": "5261000323",
+    "pin": null,
+    "device_id": "dev-005",
+    "device_name": "iPhone 12",
+    "group": 81,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$IxFk85WhIKNTx9DpJjdymd$a3vWRyq6p2c5H+SSLGHKbXjbW1yf2om8eWqgR1OOlYI=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5261000334@st.uew.edu.gh",
+    "first_name": "Nimako",
+    "last_name": "Joe",
+    "email": "5261000334@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:22.329Z",
+    "role": "student",
+    "index_number": "5261000334",
+    "pin": null,
+    "device_id": null,
+    "device_name": "Changed device",
+    "group": 82,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$5Fxby4VNtLgURApHH1NO6p$QBE6sh+FsFRTeuC+ow9Yq8VWyrQdjSQEdR0noN5J8lM=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5261000660@st.uew.edu.gh",
+    "first_name": "Osie",
+    "last_name": "Eugen Bonu",
+    "email": "5261000660@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:23.495Z",
+    "role": "student",
+    "index_number": "5261000660",
+    "pin": null,
+    "device_id": "dev-007",
+    "device_name": "Tecno Spark",
+    "group": 81,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$v5M48rn4LFXztgIo0MLXJd$jgyGM6Qrhj4sMNn8WlCafRowN92gJ40WyxyL0mHmJEs=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5261000712@st.uew.edu.gh",
+    "first_name": "Sandra",
+    "last_name": "Mensah",
+    "email": "5261000712@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:24.469Z",
+    "role": "student",
+    "index_number": "5261000712",
+    "pin": null,
+    "device_id": "dev-008",
+    "device_name": "iPhone SE",
+    "group": 82,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$s3DeH1ZRZIXyHLu3EtUlNV$FqQxG5MXqZLuL+AdGTOzFTMfXUiwohDGxa8x+bDDcqU=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5251000011@st.uew.edu.gh",
+    "first_name": "Ama",
+    "last_name": "Boateng",
+    "email": "5251000011@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:25.466Z",
+    "role": "student",
+    "index_number": "5251000011",
+    "pin": null,
+    "device_id": "dev-009",
+    "device_name": "Samsung A53",
+    "group": 83,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$U23B486CQpzOe31yT8yFij$E078AfviaYr7x93v9fEGV82Ft8vK8gf+af04rIiaMvk=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5251000022@st.uew.edu.gh",
+    "first_name": "Kofi",
+    "last_name": "Mensah",
+    "email": "5251000022@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:26.439Z",
+    "role": "student",
+    "index_number": "5251000022",
+    "pin": null,
+    "device_id": "dev-010",
+    "device_name": "iPhone 14",
+    "group": 83,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$gTde8kz81lJMZmp1l3IFE5$YXxKanKZJQKHOv5JgRC7ssAOMlCWEKPcmZI5x655mj4=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5251000033@st.uew.edu.gh",
+    "first_name": "Abena",
+    "last_name": "Osei",
+    "email": "5251000033@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:27.405Z",
+    "role": "student",
+    "index_number": "5251000033",
+    "pin": null,
+    "device_id": null,
+    "device_name": "Multiple (3)",
+    "group": 84,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$QhpcAwX4rwavK9s12JgjDx$/HmMYghYAuNoYfn2uuk2Ww89D9q2mzl2bSdlfF0W/tU=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5251000044@st.uew.edu.gh",
+    "first_name": "Kweku",
+    "last_name": "Asante",
+    "email": "5251000044@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:28.433Z",
+    "role": "student",
+    "index_number": "5251000044",
+    "pin": null,
+    "device_id": "dev-012",
+    "device_name": "Pixel 6",
+    "group": 84,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$a7GgcS6ADfw34zVLU5xSzJ$p4ab06B275Kv0Fb380W7wCQJRUgQ8SIuRFAAejFrXjY=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5251000055@st.uew.edu.gh",
+    "first_name": "Adwoa",
+    "last_name": "Darko",
+    "email": "5251000055@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:29.388Z",
+    "role": "student",
+    "index_number": "5251000055",
+    "pin": null,
+    "device_id": "dev-013",
+    "device_name": "Tecno Spark",
+    "group": 85,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$OzOAWaOSC7mB1RfdLK0luj$nT8415iBNItJtaUNdEy3hD2iXPZJm3busDFGL1QZF9s=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5241000001@st.uew.edu.gh",
+    "first_name": "Yaw",
+    "last_name": "Frempong",
+    "email": "5241000001@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:30.492Z",
+    "role": "student",
+    "index_number": "5241000001",
+    "pin": null,
+    "device_id": "dev-014",
+    "device_name": "iPhone 13 Pro",
+    "group": 86,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$qyJTOyCLLhL2hXosT5fuGW$qTNAzxe4YA0j3CeAddJmALYSeC+3ZNciGC3F5RnNPxc=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5241000002@st.uew.edu.gh",
+    "first_name": "Akosua",
+    "last_name": "Ampah",
+    "email": "5241000002@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:31.553Z",
+    "role": "student",
+    "index_number": "5241000002",
+    "pin": null,
+    "device_id": null,
+    "device_name": "Changed device",
+    "group": 86,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$BDWSgLZP8OV0kHK65VgQ99$K2OBzofwcCWnQGhV86suN/bP05ESgQd9kZ2rOa2UU9I=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5241000003@st.uew.edu.gh",
+    "first_name": "Kwame",
+    "last_name": "Ofori",
+    "email": "5241000003@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:32.705Z",
+    "role": "student",
+    "index_number": "5241000003",
+    "pin": null,
+    "device_id": "dev-016",
+    "device_name": "Pixel 7 Pro",
+    "group": 87,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$bzzkEIQ6ZxW1jXCHON6xOQ$QgrTkye7jMWKDWYu7LnPLaH95x9hstEOXX5UQk754PA=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5241000004@st.uew.edu.gh",
+    "first_name": "Efua",
+    "last_name": "Asiedu",
+    "email": "5241000004@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:33.810Z",
+    "role": "student",
+    "index_number": "5241000004",
+    "pin": null,
+    "device_id": null,
+    "device_name": "Multiple (2)",
+    "group": 87,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$PFHKtM226eSxX7XleBrw4t$6ShPl2GS5EfUCLc4bQrANsvXQA0YDGmsUrb+Pud2HNg=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5231000010@st.uew.edu.gh",
+    "first_name": "Nana",
+    "last_name": "Ama Sarpong",
+    "email": "5231000010@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:34.865Z",
+    "role": "student",
+    "index_number": "5231000010",
+    "pin": null,
+    "device_id": "dev-018",
+    "device_name": "Samsung S23",
+    "group": 88,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$YXFrPcIdPwojrUhwZKZh1w$KhGaf0xmWKduh3PuH0GqqsPyZxr0feUk8qS+8VOlhhk=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5231000011@st.uew.edu.gh",
+    "first_name": "Fiifi",
+    "last_name": "Entsie",
+    "email": "5231000011@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:35.820Z",
+    "role": "student",
+    "index_number": "5231000011",
+    "pin": null,
+    "device_id": "dev-019",
+    "device_name": "iPhone 15 Pro",
+    "group": 88,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$LB0FNzQFoEuaWqAvwtc4S7$pNaudAw9dbOLFISKzKu/jaa/qOD93J9Rji+vBxKfHgc=",
+    "last_login": null,
+    "is_superuser": false,
+    "username": "5231000012@st.uew.edu.gh",
+    "first_name": "Maame",
+    "last_name": "Serwaa",
+    "email": "5231000012@st.uew.edu.gh",
+    "is_staff": false,
+    "is_active": true,
+    "date_joined": "2026-07-28T06:57:36.818Z",
+    "role": "student",
+    "index_number": "5231000012",
+    "pin": null,
+    "device_id": null,
+    "device_name": "Multiple (2)",
+    "group": 88,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$GgGUp9akMT0dsUwxqNd4kv$f3X5O2zW8yNw9qyO+OcZok04aFUjkGfDl7q7wHThqZs=",
+    "last_login": "2026-09-21T21:06:08.842Z",
+    "is_superuser": true,
+    "username": "admin",
+    "first_name": "",
+    "last_name": "",
+    "email": "",
+    "is_staff": true,
+    "is_active": true,
+    "date_joined": "2026-09-21T21:01:37.332Z",
+    "role": "student",
+    "index_number": null,
+    "pin": null,
+    "device_id": null,
+    "device_name": null,
+    "group": null,
+    "must_change_password": false,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$PRGuuD9xb2Nx8OFnn7bWIZ$B13Awd5PXzjStQiohb9rQTtEcUry6jfHc3uUojkweOo=",
+    "last_login": null,
+    "is_superuser": true,
+    "username": "testadmin@example.com",
+    "first_name": "",
+    "last_name": "",
+    "email": "testadmin@example.com",
+    "is_staff": true,
+    "is_active": true,
+    "date_joined": "2026-09-23T06:40:37.840Z",
+    "role": "student",
+    "index_number": null,
+    "pin": null,
+    "device_id": null,
+    "device_name": null,
+    "group": null,
+    "must_change_password": true,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "accounts.user",
+  "fields": {
+    "password": "pbkdf2_sha256$720000$MrAaCacitW2lbAMEEuEQv1$lnqFUo4A9QSROnVyCjhkr0UyFU9Ri9Djo72rqmBPYB0=",
+    "last_login": null,
+    "is_superuser": true,
+    "username": "odemmzy@gmail.com",
+    "first_name": "",
+    "last_name": "",
+    "email": "odemmzy@gmail.com",
+    "is_staff": true,
+    "is_active": true,
+    "date_joined": "2026-09-23T06:41:08.048Z",
+    "role": "student",
+    "index_number": null,
+    "pin": null,
+    "device_id": null,
+    "device_name": null,
+    "group": null,
+    "must_change_password": false,
+    "groups": [],
+    "user_permissions": []
+  }
+},
+{
+  "model": "courses.studentgroup",
+  "pk": 81,
+  "fields": {
+    "name": "Group 1",
+    "level": 37,
+    "academic_period": 11,
+    "lecturer": null
+  }
+},
+{
+  "model": "courses.studentgroup",
+  "pk": 82,
+  "fields": {
+    "name": "Group 2",
+    "level": 37,
+    "academic_period": 11,
+    "lecturer": null
+  }
+},
+{
+  "model": "courses.studentgroup",
+  "pk": 83,
+  "fields": {
+    "name": "Group 1",
+    "level": 38,
+    "academic_period": 11,
+    "lecturer": null
+  }
+},
+{
+  "model": "courses.studentgroup",
+  "pk": 84,
+  "fields": {
+    "name": "Group 2",
+    "level": 38,
+    "academic_period": 11,
+    "lecturer": null
+  }
+},
+{
+  "model": "courses.studentgroup",
+  "pk": 85,
+  "fields": {
+    "name": "Group 3",
+    "level": 38,
+    "academic_period": 11,
+    "lecturer": null
+  }
+},
+{
+  "model": "courses.studentgroup",
+  "pk": 86,
+  "fields": {
+    "name": "Group 1",
+    "level": 39,
+    "academic_period": 11,
+    "lecturer": null
+  }
+},
+{
+  "model": "courses.studentgroup",
+  "pk": 87,
+  "fields": {
+    "name": "Group 2",
+    "level": 39,
+    "academic_period": 11,
+    "lecturer": null
+  }
+},
+{
+  "model": "courses.studentgroup",
+  "pk": 88,
+  "fields": {
+    "name": "Group 1",
+    "level": 40,
+    "academic_period": 11,
+    "lecturer": null
+  }
+},
+{
+  "model": "courses.course",
+  "pk": 70,
+  "fields": {
+    "code": "ICTE125",
+    "name": "Multimedia Authoring in Education",
+    "level": 37,
+    "academic_period": 11
+  }
+},
+{
+  "model": "courses.course",
+  "pk": 71,
+  "fields": {
+    "code": "ICTW123",
+    "name": "Fundamentals of Computer Programming",
+    "level": 37,
+    "academic_period": 11
+  }
+},
+{
+  "model": "courses.course",
+  "pk": 72,
+  "fields": {
+    "code": "ICTS201",
+    "name": "Systems Analysis and Design",
+    "level": 38,
+    "academic_period": 11
+  }
+},
+{
+  "model": "courses.course",
+  "pk": 73,
+  "fields": {
+    "code": "ICTD310",
+    "name": "Database Management Systems",
+    "level": 39,
+    "academic_period": 11
+  }
+},
+{
+  "model": "courses.lecturercourse",
+  "pk": 58,
+  "fields": {
+    "lecturer": [
+      "lecturer@infoctess.edu"
+    ],
+    "course": 70,
+    "academic_period": 11
+  }
+},
+{
+  "model": "courses.lecturercourse",
+  "pk": 59,
+  "fields": {
+    "lecturer": [
+      "lecturer@infoctess.edu"
+    ],
+    "course": 71,
+    "academic_period": 11
+  }
+},
+{
+  "model": "courses.lecturercourse",
+  "pk": 60,
+  "fields": {
+    "lecturer": [
+      "lecturer@infoctess.edu"
+    ],
+    "course": 72,
+    "academic_period": 11
+  }
+},
+{
+  "model": "courses.lecturercourse",
+  "pk": 61,
+  "fields": {
+    "lecturer": [
+      "lecturer@infoctess.edu"
+    ],
+    "course": 73,
+    "academic_period": 11
+  }
+},
+{
+  "model": "courses.courserep",
+  "pk": 20,
+  "fields": {
+    "student": [
+      "5261000018@st.uew.edu.gh"
+    ],
+    "course": null,
+    "group": 81,
+    "academic_period": 11,
+    "created_by": null
+  }
+},
+{
+  "model": "courses.courserep",
+  "pk": 21,
+  "fields": {
+    "student": [
+      "5261000323@st.uew.edu.gh"
+    ],
+    "course": null,
+    "group": 81,
+    "academic_period": 11,
+    "created_by": null
+  }
+},
+{
+  "model": "attendance.attendancesession",
+  "pk": 77,
+  "fields": {
+    "session_code": "ATT-4869",
+    "course": 70,
+    "group": 81,
+    "opened_at": "2026-07-28T06:57:37.876Z",
+    "closed_at": "2026-07-26T07:57:37.876Z",
+    "time_window_minutes": 10,
+    "status": "closed",
+    "created_by": [
+      "lecturer@infoctess.edu"
+    ],
+    "qr_data": null
+  }
+},
+{
+  "model": "attendance.attendancesession",
+  "pk": 78,
+  "fields": {
+    "session_code": "ATT-6162",
+    "course": 71,
+    "group": 81,
+    "opened_at": "2026-07-28T06:57:37.914Z",
+    "closed_at": "2026-07-27T07:57:37.914Z",
+    "time_window_minutes": 10,
+    "status": "closed",
+    "created_by": [
+      "lecturer@infoctess.edu"
+    ],
+    "qr_data": null
+  }
+},
+{
+  "model": "attendance.attendancesession",
+  "pk": 79,
+  "fields": {
+    "session_code": "ATT-6656",
+    "course": 71,
+    "group": 82,
+    "opened_at": "2026-07-28T06:57:37.938Z",
+    "closed_at": "2026-07-28T02:57:37.937Z",
+    "time_window_minutes": 15,
+    "status": "closed",
+    "created_by": [
+      "lecturer@infoctess.edu"
+    ],
+    "qr_data": null
+  }
+},
+{
+  "model": "attendance.attendancerecord",
+  "pk": 121,
+  "fields": {
+    "session": 77,
+    "student": [
+      "5261000018@st.uew.edu.gh"
+    ],
+    "checked_in_at": "2026-07-28T06:57:37.891Z",
+    "method": "qr_code",
+    "device_id": null,
+    "device_name": null
+  }
+},
+{
+  "model": "attendance.attendancerecord",
+  "pk": 122,
+  "fields": {
+    "session": 77,
+    "student": [
+      "5261000215@st.uew.edu.gh"
+    ],
+    "checked_in_at": "2026-07-28T06:57:37.901Z",
+    "method": "code",
+    "device_id": null,
+    "device_name": null
+  }
+},
+{
+  "model": "attendance.attendancerecord",
+  "pk": 123,
+  "fields": {
+    "session": 78,
+    "student": [
+      "5261000712@st.uew.edu.gh"
+    ],
+    "checked_in_at": "2026-07-28T06:57:37.926Z",
+    "method": "qr_code",
+    "device_id": null,
+    "device_name": null
+  }
+},
+{
+  "model": "attendance.attendancerecord",
+  "pk": 124,
+  "fields": {
+    "session": 79,
+    "student": [
+      "5261000334@st.uew.edu.gh"
+    ],
+    "checked_in_at": "2026-07-28T06:57:37.949Z",
+    "method": "code",
+    "device_id": null,
+    "device_name": null
+  }
+},
+{
+  "model": "attendance.attendancerecord",
+  "pk": 125,
+  "fields": {
+    "session": 79,
+    "student": [
+      "5261000323@st.uew.edu.gh"
+    ],
+    "checked_in_at": "2026-07-28T06:57:37.961Z",
+    "method": "qr_code",
+    "device_id": null,
+    "device_name": null
+  }
+},
+{
+  "model": "attendance.devicealert",
+  "pk": 69,
+  "fields": {
+    "student": [
+      "5261000267@st.uew.edu.gh"
+    ],
+    "alert_type": "multi_device",
+    "reason": "Logged in from 2 devices: iPhone 12 & Samsung A52",
+    "detected_at": "2026-07-28T06:57:21.016Z",
+    "status": "open"
+  }
+},
+{
+  "model": "attendance.devicealert",
+  "pk": 70,
+  "fields": {
+    "student": [
+      "5261000334@st.uew.edu.gh"
+    ],
+    "alert_type": "device_change",
+    "reason": "Device changed: Tecno Spark → Infinix Hot 20",
+    "detected_at": "2026-07-28T06:57:23.486Z",
+    "status": "open"
+  }
+},
+{
+  "model": "attendance.devicealert",
+  "pk": 71,
+  "fields": {
+    "student": [
+      "5251000033@st.uew.edu.gh"
+    ],
+    "alert_type": "multi_device",
+    "reason": "Signed in from 3 different devices this semester",
+    "detected_at": "2026-07-28T06:57:28.424Z",
+    "status": "open"
+  }
+},
+{
+  "model": "attendance.devicealert",
+  "pk": 72,
+  "fields": {
+    "student": [
+      "5241000002@st.uew.edu.gh"
+    ],
+    "alert_type": "device_change",
+    "reason": "Phone changed mid-semester: Huawei P30 → Samsung S22",
+    "detected_at": "2026-07-28T06:57:32.694Z",
+    "status": "open"
+  }
+},
+{
+  "model": "attendance.devicealert",
+  "pk": 73,
+  "fields": {
+    "student": [
+      "5241000004@st.uew.edu.gh"
+    ],
+    "alert_type": "multi_device",
+    "reason": "Two devices detected in same session: iPhone 11 & Oppo A57",
+    "detected_at": "2026-07-28T06:57:34.856Z",
+    "status": "open"
+  }
+},
+{
+  "model": "attendance.devicealert",
+  "pk": 74,
+  "fields": {
+    "student": [
+      "5231000012@st.uew.edu.gh"
+    ],
+    "alert_type": "multi_device",
+    "reason": "Checked in using 2 phones: own device + borrowed device detected",
+    "detected_at": "2026-07-28T06:57:37.868Z",
+    "status": "open"
+  }
+}
+]
