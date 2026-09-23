@@ -81,9 +81,9 @@ class Command(BaseCommand):
         u3.save()
         self.stdout.write(self.style.SUCCESS('Superuser admin@infoctess.edu ready'))
 
-        # Auto-seed initial prototype data if database is empty of regular users
-        if User.objects.filter(is_superuser=False).count() == 0:
-            self.stdout.write('Database has no regular users. Running seed_data...')
+        # Auto-seed initial prototype data if seed data has not been loaded yet
+        if not User.objects.filter(email='lecturer@infoctess.edu').exists():
+            self.stdout.write('Seed data missing. Running seed_data...')
             from django.core.management import call_command
             try:
                 call_command('seed_data')
