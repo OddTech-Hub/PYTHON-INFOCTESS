@@ -80,3 +80,21 @@ class Command(BaseCommand):
         u3.set_password(password)
         u3.save()
         self.stdout.write(self.style.SUCCESS('Superuser admin@infoctess.edu ready'))
+
+        # Auto-seed initial prototype data if database is empty of regular users
+        if User.objects.filter(is_superuser=False).count() == 0:
+            self.stdout.write('Database has no regular users. Running seed_data...')
+            from django.core.management import call_command
+            try:
+                call_command('seed_data')
+                self.stdout.write(self.style.SUCCESS('Initial prototype data seeded successfully!'))
+                # Re-ensure admin accounts after seed
+                u1.set_password(password)
+                u1.save()
+                u2.set_password(password)
+                u2.save()
+                u3.set_password(password)
+                u3.save()
+            except Exception as e:
+                self.stdout.write(self.style.ERROR(f'Failed to seed data: {e}'))
+

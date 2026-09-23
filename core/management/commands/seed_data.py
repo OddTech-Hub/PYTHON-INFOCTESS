@@ -84,12 +84,12 @@ class Command(BaseCommand):
             role=User.Role.LECTURER
         )
 
-        # Ensure Admin superuser password is reset to admin123
+        # Ensure Admin superuser password is set to Admin@12345
         admin_user = User.objects.filter(is_superuser=True).first()
         if not admin_user:
-            admin_user = User.objects.create_superuser('admin@infoctess.edu', 'admin@infoctess.edu', 'admin123', first_name='System', last_name='Admin')
+            admin_user = User.objects.create_superuser('admin@infoctess.edu', 'admin@infoctess.edu', 'Admin@12345', first_name='System', last_name='Admin')
         else:
-            admin_user.set_password('admin123')
+            admin_user.set_password('Admin@12345')
             admin_user.save()
 
         # 2. Students & Reps Data Mapping
