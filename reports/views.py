@@ -114,20 +114,27 @@ class LevelSummaryView(APIView):
         if rep_group_ids is not None:
             all_sessions = all_sessions.filter(models.Q(group_id__in=rep_group_ids) | models.Q(created_by=request.user))
 
-        sessions_data = [{
-            'id': s.session_code,
-            'session_code': s.session_code,
-            'status': s.status,
-            'opened_at': s.opened_at.isoformat() if s.opened_at else None,
-            'course': {
-                'id': s.course.id if s.course else None,
-                'code': s.course.code if s.course else '',
-                'name': s.course.name if s.course else ''
-            },
-            'group': s.group.name if s.group else '',
-            'time_window': s.time_window_minutes,
-            'qr_data': s.qr_data or f'infoctess://session/{s.session_code}'
-        } for s in all_sessions]
+        is_student = request.user.is_authenticated and getattr(request.user, 'role', None) == User.Role.STUDENT
+
+        sessions_data = []
+        for s in all_sessions:
+            item = {
+                'id': s.session_code if (s.status != 'active' or not is_student) else f"session-{s.id}",
+                'status': s.status,
+                'opened_at': s.opened_at.isoformat() if s.opened_at else None,
+                'course': {
+                    'id': s.course.id if s.course else None,
+                    'code': s.course.code if s.course else '',
+                    'name': s.course.name if s.course else ''
+                },
+                'group': s.group.name if s.group else '',
+                'time_window': s.time_window_minutes,
+            }
+            # Conceal active session code and QR payload from students to prevent remote check-ins
+            if s.status != 'active' or not is_student:
+                item['session_code'] = s.session_code
+                item['qr_data'] = s.qr_data or f'infoctess://session/{s.session_code}'
+            sessions_data.append(item)
 
         return Response({
             'success': True,
