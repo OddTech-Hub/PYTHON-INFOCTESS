@@ -242,15 +242,10 @@ class CheckinView(APIView):
         session = AttendanceSession.objects.filter(session_code__iexact=session_code, status='active').first()
 
         if not session:
-            has_active = AttendanceSession.objects.filter(status='active').exists()
-            if not has_active:
-                msg = "There are no active attendance sessions open right now."
-            else:
-                msg = "Invalid session code. Please check the lecture screen and try again."
             logger.warning(f"[CHECKIN] REJECTED for code='{session_code}'")
             return Response({
                 'success': False,
-                'message': msg
+                'message': 'Invalid session. Please contact your Course Representative or Lecturer.'
             }, status=status.HTTP_404_NOT_FOUND)
 
         # Flexible student lookup
