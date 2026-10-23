@@ -78,6 +78,19 @@ class RepLoginView(APIView):
                 'message': 'Invalid student or course rep credentials.'
             }, status=status.HTTP_401_UNAUTHORIZED)
 
+        # Capture and bind student device details
+        device_id = request.data.get('device_id', '').strip()
+        device_name = request.data.get('device_name', '').strip()
+        updated_fields = []
+        if device_id and user.device_id != device_id:
+            user.device_id = device_id
+            updated_fields.append('device_id')
+        if device_name and user.device_name != device_name:
+            user.device_name = device_name
+            updated_fields.append('device_name')
+        if updated_fields:
+            user.save(update_fields=updated_fields)
+
         refresh = RefreshToken.for_user(user)
         return Response({
             'success': True,
@@ -214,3 +227,126 @@ class AdminUserDeleteView(APIView):
                 'message': 'User not found.'
             }, status=status.HTTP_404_NOT_FOUND)
 
+
+class StudentBulkImportView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        if request.user.role not in [User.Role.LECTURER, User.Role.REP] and not request.user.is_staff:
+            return Response({
+                'success': False,
+                'message': 'Only lecturers or administrators can bulk upload students.'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        csv_file = request.FILES.get('file') or request.FILES.get('csv_file')
+        if not csv_file:
+            return Response({
+                'success': False,
+                'message': 'CSV file is required.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        import csv
+        import io
+        from courses.models import StudentGroup
+
+        try:
+            decoded = csv_file.read().decode('utf-8-sig', errors='ignore')
+            reader = csv.reader(io.StringIO(decoded))
+            raw_headers = next(reader, None)
+            if not raw_headers:
+                return Response({'success': False, 'message': 'CSV file is empty.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            headers = [h.strip().lower().replace(' ', '_').replace('-', '_') for h in raw_headers]
+
+            # Flexible column matching
+            idx_keys = ['index_number', 'index', 'index_no', 'id', 'student_id', 'matric_no']
+            email_keys = ['email', 'gmail', 'mail', 'student_email', 'google_mail']
+            fname_keys = ['first_name', 'firstname', 'first', 'given_name']
+            lname_keys = ['last_name', 'lastname', 'last', 'surname']
+            name_keys = ['name', 'full_name', 'fullname', 'student_name']
+            group_keys = ['group', 'student_group', 'group_name', 'level', 'level_id']
+
+            def find_val(row_dict, candidate_keys):
+                for k in candidate_keys:
+                    if k in row_dict and row_dict[k]:
+                        return str(row_dict[k]).strip()
+                return ''
+
+            default_group = StudentGroup.objects.first()
+            created_count = 0
+            updated_count = 0
+            skipped_count = 0
+
+            for row_arr in reader:
+                if not row_arr or not any(row_arr):
+                    continue
+                row = dict(zip(headers, row_arr))
+                index_num = find_val(row, idx_keys)
+                email = find_val(row, email_keys)
+
+                if not index_num and not email:
+                    skipped_count += 1
+                    continue
+
+                if not email and index_num:
+                    email = f"{index_num}@st.uew.edu.gh"
+                if not index_num and email and '@' in email:
+                    prefix = email.split('@')[0]
+                    if prefix.isdigit():
+                        index_num = prefix
+
+                first_name = find_val(row, fname_keys)
+                last_name = find_val(row, lname_keys)
+                full_name = find_val(row, name_keys)
+
+                if full_name and (not first_name or not last_name):
+                    parts = full_name.split(' ', 1)
+                    first_name = parts[0]
+                    last_name = parts[1] if len(parts) > 1 else ''
+
+                if not first_name:
+                    first_name = "Student"
+                if not last_name:
+                    last_name = index_num or email.split('@')[0]
+
+                # Check if user already exists
+                user = User.objects.filter(index_number=index_num).first() if index_num else None
+                if not user and email:
+                    user = User.objects.filter(email__iexact=email).first()
+
+                if user:
+                    if email:
+                        user.email = email
+                    user.must_change_password = True
+                    user.save()
+                    updated_count += 1
+                else:
+                    new_user = User(
+                        username=email,
+                        email=email,
+                        index_number=index_num if index_num else None,
+                        first_name=first_name,
+                        last_name=last_name,
+                        role=User.Role.STUDENT,
+                        must_change_password=True,
+                        group=default_group
+                    )
+                    # Default password is set to infoctess123; student must set their own upon first login
+                    new_user.set_password('password123')
+                    new_user.save()
+                    created_count += 1
+
+            return Response({
+                'success': True,
+                'message': f'Successfully processed students: {created_count} new registered, {updated_count} updated, {skipped_count} skipped.',
+                'data': {
+                    'created': created_count,
+                    'updated': updated_count,
+                    'skipped': skipped_count
+                }
+            })
+        except Exception as err:
+            return Response({
+                'success': False,
+                'message': f'CSV parsing error: {str(err)}'
+            }, status=status.HTTP_400_BAD_REQUEST)

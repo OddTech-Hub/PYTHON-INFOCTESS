@@ -272,6 +272,14 @@ class CheckinView(APIView):
                 'message': 'Student has already checked in.'
             }, status=status.HTTP_400_BAD_REQUEST)
 
+        # Update student device binding
+        if device_id:
+            student.device_id = device_id
+        if device_name:
+            student.device_name = device_name
+        if device_id or device_name:
+            student.save(update_fields=['device_id', 'device_name'])
+
         # ── Check for device alerts (proxy detection) ──
         
         # 1. Multi Device Login:

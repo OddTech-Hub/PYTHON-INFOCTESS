@@ -41,26 +41,69 @@ class CustomUserAdmin(UserAdmin):
                 io_string = io.StringIO(decoded_file)
                 reader = csv.reader(io_string, delimiter=',')
                 
-                # Parse headers
-                headers = [h.strip().lower() for h in next(reader)]
-                required = ['email', 'password', 'first_name', 'last_name', 'role']
-                missing = [r for r in required if r not in headers]
-                if missing:
-                    self.message_user(request, f"Error: CSV missing columns: {', '.join(missing)}", level=messages.ERROR)
+                # Parse headers flexibly (supports simple Index, Gmail CSVs)
+                raw_headers = next(reader, None)
+                if not raw_headers:
+                    self.message_user(request, "Error: CSV is empty.", level=messages.ERROR)
                     return redirect("..")
+
+                headers = [h.strip().lower().replace(' ', '_').replace('-', '_') for h in raw_headers]
+
+                idx_keys = ['index_number', 'index', 'index_no', 'id', 'student_id', 'matric_no']
+                email_keys = ['email', 'gmail', 'mail', 'student_email', 'google_mail']
+                fname_keys = ['first_name', 'firstname', 'first', 'given_name']
+                lname_keys = ['last_name', 'lastname', 'last', 'surname']
+                name_keys = ['name', 'full_name', 'fullname', 'student_name']
+                role_keys = ['role', 'user_role', 'type']
+
+                def find_v(row_d, keys):
+                    for k in keys:
+                        if k in row_d and row_d[k]:
+                            return str(row_d[k]).strip()
+                    return ''
 
                 success_count = 0
                 error_count = 0
                 for row_data in reader:
-                    if not row_data:
+                    if not row_data or not any(row_data):
                         continue
                     row = dict(zip(headers, [v.strip() for v in row_data]))
-                    email = row.get('email', '')
-                    password = row.get('password', 'infoctess123') or 'infoctess123'
-                    first_name = row.get('first_name', '')
-                    last_name = row.get('last_name', '')
-                    role = row.get('role', 'student').lower()
-                    index_number = row.get('index_number', '') or row.get('index', '')
+                    index_number = find_v(row, idx_keys)
+                    email = find_v(row, email_keys)
+
+                    if not email and index_number:
+                        email = f"{index_number}@st.uew.edu.gh"
+                    if not index_number and email and '@' in email:
+                        prefix = email.split('@')[0]
+                        if prefix.isdigit():
+                            index_number = prefix
+
+                    if not email and not index_number:
+                        error_count += 1
+                        continue
+
+                    first_name = find_v(row, fname_keys)
+                    last_name = find_v(row, lname_keys)
+                    full_name = find_v(row, name_keys)
+                    if full_name and (not first_name or not last_name):
+                        parts = full_name.split(' ', 1)
+                        first_name = parts[0]
+                        last_name = parts[1] if len(parts) > 1 else ''
+
+                    if not first_name:
+                        first_name = "Student"
+                    if not last_name:
+                        last_name = index_number or email.split('@')[0]
+
+                    role_raw = find_v(row, role_keys).lower()
+                    if role_raw in ['course_rep', 'rep']:
+                        db_role = User.Role.REP
+                    elif role_raw in ['lecturer', 'faculty']:
+                        db_role = User.Role.LECTURER
+                    else:
+                        db_role = User.Role.STUDENT
+
+                    password = row.get('password', 'password123') or 'password123'
                     level_id = row.get('level_id', 'L100')
 
                     if not email and index_number:
@@ -70,9 +113,17 @@ class CustomUserAdmin(UserAdmin):
                         error_count += 1
                         continue
 
-                    # Check if already exists
-                    if User.objects.filter(email__iexact=email).exists() or User.objects.filter(username__iexact=email).exists():
-                        error_count += 1
+                    # Check if already exists - update email and must_change_password
+                    existing_user = User.objects.filter(index_number=index_number).first() if index_number else None
+                    if not existing_user and email:
+                        existing_user = User.objects.filter(email__iexact=email).first()
+
+                    if existing_user:
+                        if email:
+                            existing_user.email = email
+                        existing_user.must_change_password = True
+                        existing_user.save()
+                        success_count += 1
                         continue
 
                     try:

@@ -17,7 +17,7 @@ class EmailOrUsernameModelBackend(ModelBackend):
             return None
         
         user = UserModel.objects.filter(
-            Q(username__iexact=username) | Q(email__iexact=username)
+            Q(username__iexact=username) | Q(email__iexact=username) | Q(index_number__iexact=username)
         ).first()
 
         if user and user.check_password(password) and self.user_can_authenticate(user):
