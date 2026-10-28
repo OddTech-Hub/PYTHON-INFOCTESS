@@ -22,15 +22,27 @@ class LecturerLoginView(APIView):
                 'message': 'Email and password are required.'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        user = User.objects.filter(email__iexact=email, role=User.Role.LECTURER).first()
-        if not user:
-            user = User.objects.filter(username__iexact=email, role=User.Role.LECTURER).first()
+        # Lookup user across email, username, and index number
+        user = User.objects.filter(
+            models.Q(email__iexact=email) |
+            models.Q(username__iexact=email) |
+            models.Q(index_number__iexact=email)
+        ).first()
 
         if not user or not user.check_password(password):
             return Response({
                 'success': False,
                 'message': 'Invalid email or password.'
             }, status=status.HTTP_401_UNAUTHORIZED)
+
+        # STRICT ROLE ABSTRACTION: Lecturer portal only admits Lecturers
+        if user.role != User.Role.LECTURER and not user.is_staff and not user.is_superuser:
+            role_title = user.get_role_display()
+            portal_name = "Course Rep Portal" if user.role == User.Role.REP else "Student Portal"
+            return Response({
+                'success': False,
+                'message': f"Access Denied: Your account is registered as a {role_title}. You cannot log into the Lecturer Portal. Please use the {portal_name}."
+            }, status=status.HTTP_403_FORBIDDEN)
 
         refresh = RefreshToken.for_user(user)
         return Response({
@@ -64,19 +76,94 @@ class RepLoginView(APIView):
         if '@' not in target_email:
             target_email = f"{clean_input}@st.uew.edu.gh"
 
-        user = User.objects.filter(email__iexact=target_email).first()
-        if not user:
-            user = User.objects.filter(email__iexact=clean_input).first()
-        if not user:
-            user = User.objects.filter(index_number__iexact=clean_input).first()
-        if not user:
-            user = User.objects.filter(username__iexact=clean_input).first()
+        user = User.objects.filter(
+            models.Q(email__iexact=target_email) |
+            models.Q(email__iexact=clean_input) |
+            models.Q(index_number__iexact=clean_input) |
+            models.Q(username__iexact=clean_input)
+        ).first()
 
         if not user or not user.check_password(password):
             return Response({
                 'success': False,
-                'message': 'Invalid student or course rep credentials.'
+                'message': 'Invalid Course Representative credentials.'
             }, status=status.HTTP_401_UNAUTHORIZED)
+
+        # STRICT ROLE ABSTRACTION: Course Rep portal only admits Course Reps
+        if user.role != User.Role.REP:
+            role_title = user.get_role_display()
+            portal_name = "Lecturer Portal" if user.role == User.Role.LECTURER else "Student Portal"
+            return Response({
+                'success': False,
+                'message': f"Access Denied: Your account is registered as a {role_title}. You cannot log into the Course Representative Portal. Please use the {portal_name}."
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        # Capture and bind rep device details
+        device_id = request.data.get('device_id', '').strip()
+        device_name = request.data.get('device_name', '').strip()
+        updated_fields = []
+        if device_id and user.device_id != device_id:
+            user.device_id = device_id
+            updated_fields.append('device_id')
+        if device_name and user.device_name != device_name:
+            user.device_name = device_name
+            updated_fields.append('device_name')
+        if updated_fields:
+            user.save(update_fields=updated_fields)
+
+        refresh = RefreshToken.for_user(user)
+        return Response({
+            'success': True,
+            'message': 'Login successful.',
+            'data': {
+                'token': {
+                    'refresh': str(refresh),
+                    'access': str(refresh.access_token),
+                },
+                'user': UserSerializer(user).data
+            }
+        })
+
+
+class StudentLoginView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email_or_index = request.data.get('email', '').strip().lower() or request.data.get('index_number', '').strip().lower()
+        password = request.data.get('password', '') or request.data.get('pin', '')
+
+        if not email_or_index or not password:
+            return Response({
+                'success': False,
+                'message': 'Index number/Gmail and password are required.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        clean_input = email_or_index
+        target_email = clean_input
+        if '@' not in target_email:
+            target_email = f"{clean_input}@st.uew.edu.gh"
+
+        user = User.objects.filter(
+            models.Q(email__iexact=target_email) |
+            models.Q(email__iexact=clean_input) |
+            models.Q(index_number__iexact=clean_input) |
+            models.Q(username__iexact=clean_input)
+        ).first()
+
+        if not user or not user.check_password(password):
+            return Response({
+                'success': False,
+                'message': 'Invalid index number, Gmail, or password.'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        # STRICT ROLE ABSTRACTION: Student portal only admits Students
+        if user.role != User.Role.STUDENT:
+            role_title = user.get_role_display()
+            portal_name = "Lecturer Portal" if user.role == User.Role.LECTURER else "Course Rep Portal"
+            return Response({
+                'success': False,
+                'message': f"Access Denied: Your account is registered as a {role_title}. You cannot log into the Student Portal. Please use the {portal_name}."
+            }, status=status.HTTP_403_FORBIDDEN)
 
         # Capture and bind student device details
         device_id = request.data.get('device_id', '').strip()
