@@ -71,7 +71,7 @@ TEMPLATES = [
 WSGI_APPLICATION = 'infoctess.wsgi.application'
 
 # Database
-# Uses PostgreSQL on Railway (via DATABASE_URL), SQLite locally
+# PostgreSQL via DATABASE_URL (Supabase / Production), SQLite locally if none
 DATABASE_URL = config('DATABASE_URL', default=None)
 if DATABASE_URL:
     DATABASES = {
