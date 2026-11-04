@@ -150,7 +150,7 @@ SIMPLE_JWT = {
     'USER_ID_CLAIM': 'user_id',
 }
 
-# CORS & CSRF Settings
+# CORS & CSRF Settings - Production Config
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
@@ -159,14 +159,23 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
     'ngrok-skip-browser-warning',
 ]
 
-raw_csrf_origins = config(
-    'CSRF_TRUSTED_ORIGINS',
-    default='https://*.up.railway.app,https://*.vercel.app,https://*.herokuapp.com,http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000'
-)
-CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in raw_csrf_origins.split(',') if origin.strip()]
+CSRF_TRUSTED_ORIGINS = [
+    'https://smart-attandance-23d3de69093c.herokuapp.com',
+    'https://*.herokuapp.com',
+    'https://infoctess-web-frontend-5-0.vercel.app',
+    'https://*.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:8000',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:8000',
+]
 
-# Frontend Landing Page Configuration
-FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
+# Heroku Proxy and SSL configuration
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
+USE_X_FORWARDED_PORT = True
+
+FRONTEND_URL = config('FRONTEND_URL', default='https://infoctess-web-frontend-5-0.vercel.app')
 LOGOUT_REDIRECT_URL = FRONTEND_URL
 
 
