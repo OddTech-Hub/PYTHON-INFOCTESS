@@ -153,9 +153,14 @@ SIMPLE_JWT = {
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
+from corsheaders.defaults import default_headers
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'ngrok-skip-browser-warning',
+]
+
 raw_csrf_origins = config(
     'CSRF_TRUSTED_ORIGINS',
-    default='https://*.up.railway.app,https://*.vercel.app,http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000'
+    default='https://*.up.railway.app,https://*.vercel.app,https://*.herokuapp.com,http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000'
 )
 CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in raw_csrf_origins.split(',') if origin.strip()]
 
@@ -164,3 +169,6 @@ FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
 LOGOUT_REDIRECT_URL = FRONTEND_URL
 
 
+
+# Production Security Headers
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
