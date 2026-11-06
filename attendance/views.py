@@ -282,17 +282,21 @@ class CheckinView(APIView):
 
         # ── Check for device alerts (proxy detection) ──
         
-        # 1. Multi Device Login:
-        # Check if another student has checked in using this device in this session
+        # 1. Multi Device Login / Proxy Attendance Prevention:
+        # Check if another student has already checked in using this device in this session
         other_checkin = AttendanceRecord.objects.filter(session=session, device_id=device_id).exclude(student=student).first()
         if other_checkin:
-            reason = f"Logged in from same device as student: {other_checkin.student.first_name} {other_checkin.student.last_name} ({other_checkin.student.index_number})"
+            reason = f"Proxy attempt: Device already used by {other_checkin.student.first_name} {other_checkin.student.last_name} ({other_checkin.student.index_number})"
             DeviceAlert.objects.get_or_create(
                 student=student,
                 alert_type='multi_device',
                 reason=reason,
                 status='open'
             )
+            return Response({
+                'success': False,
+                'message': 'This device has already marked attendance for this session. Proxy attendance is strictly prohibited.'
+            }, status=status.HTTP_403_FORBIDDEN)
 
         # 2. Device Change:
         # Check if the student's primary device_id is different from the current device
@@ -310,13 +314,22 @@ class CheckinView(APIView):
             student.device_name = device_name
             student.save()
 
+        # Generate clean sequential attendance receipt code (e.g. ATT-001-GP1)
+        count = AttendanceRecord.objects.filter(session=session).count() + 1
+        group_tag = ""
+        if session.group:
+            raw_grp = str(session.group.name).upper().replace('GROUP', 'GP').replace(' ', '')
+            group_tag = f"-{raw_grp}"
+        receipt_code = f"ATT-{count:03d}{group_tag}"
+
         # Record check-in
         record = AttendanceRecord.objects.create(
             session=session,
             student=student,
             method=method,
             device_id=device_id,
-            device_name=device_name
+            device_name=device_name,
+            receipt_code=receipt_code
         )
 
         return Response({
@@ -329,6 +342,8 @@ class CheckinView(APIView):
                 'avatar': f"{student.first_name[0]}{student.last_name[0]}".upper(),
                 'method': "QR Code" if method == 'qr_code' else "Session Code",
                 'session_code': session.session_code,
+                'receipt_code': receipt_code,
+                'ref_id': receipt_code,
                 'courseCode': session.course.code if session.course else '',
                 'courseName': session.course.name if session.course else 'Attendance Session',
                 'group': session.group.name if session.group else ''

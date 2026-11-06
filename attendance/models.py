@@ -35,12 +35,13 @@ class AttendanceRecord(models.Model):
     method = models.CharField(max_length=20, choices=METHOD_CHOICES, default='session_code')
     device_id = models.CharField(max_length=100, blank=True, null=True)
     device_name = models.CharField(max_length=100, blank=True, null=True)
+    receipt_code = models.CharField(max_length=50, blank=True, null=True, help_text="e.g. ATT-001-GP1")
 
     class Meta:
         unique_together = ('session', 'student')
 
     def __str__(self):
-        return f"{self.student.username} checked in to {self.session.session_code}"
+        return f"{self.student.username} checked in to {self.session.session_code} ({self.receipt_code or ''})"
 
 
 class DeviceAlert(models.Model):
