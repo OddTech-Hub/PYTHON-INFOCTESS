@@ -127,9 +127,9 @@ class CustomUserAdmin(UserAdmin):
                         continue
 
                     try:
-                        if role in ['course_rep', 'rep']:
+                        if role_raw in ['course_rep', 'rep']:
                             db_role = User.Role.REP
-                        elif role in ['lecturer', 'faculty']:
+                        elif role_raw in ['lecturer', 'faculty']:
                             db_role = User.Role.LECTURER
                         else:
                             db_role = User.Role.STUDENT
