@@ -14,3 +14,4 @@ class ExceptionDiagnosticMiddleware:
         if request.user.is_authenticated and request.user.is_superuser:
             return HttpResponse(f"<h1>Debug Error Traceback</h1><pre>{tb}</pre>", status=500)
         return None
+

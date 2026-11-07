@@ -398,6 +398,17 @@ class StudentBulkImportView(APIView):
                 if not last_name:
                     last_name = index_num or email.split('@')[0]
 
+                # Resolve student group dynamically
+                group_obj = default_group
+                group_name = find_val(row, ['group', 'student_group', 'group_name', 'class_group'])
+                level_str = find_val(row, ['level_id', 'level']) or 'L100'
+                if group_name:
+                    found_grp = StudentGroup.objects.filter(name__iexact=group_name, level__code=level_str).first()
+                    if not found_grp:
+                        found_grp = StudentGroup.objects.filter(name__icontains=group_name).first()
+                    if found_grp:
+                        group_obj = found_grp
+
                 # Check if user already exists
                 user = User.objects.filter(index_number=index_num).first() if index_num else None
                 if not user and email:
@@ -406,6 +417,8 @@ class StudentBulkImportView(APIView):
                 if user:
                     if email:
                         user.email = email
+                    if group_obj:
+                        user.group = group_obj
                     user.must_change_password = True
                     user.save()
                     updated_count += 1
@@ -418,7 +431,7 @@ class StudentBulkImportView(APIView):
                         last_name=last_name,
                         role=User.Role.STUDENT,
                         must_change_password=True,
-                        group=default_group
+                        group=group_obj
                     )
                     # Default password is set to infoctess123; student must set their own upon first login
                     new_user.set_password('password123')

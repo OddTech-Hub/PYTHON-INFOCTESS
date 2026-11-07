@@ -5,9 +5,15 @@ import io
 from django import forms
 from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin
+from django.contrib.auth.forms import UserCreationForm
 from django.urls import path, reverse
 from django.shortcuts import render, redirect
 from .models import User
+
+class CustomUserCreationForm(UserCreationForm):
+    class Meta(UserCreationForm.Meta):
+        model = User
+        fields = ('username', 'email', 'first_name', 'last_name', 'role', 'index_number', 'group')
 
 class CSVImportForm(forms.Form):
     csv_file = forms.FileField()
@@ -33,11 +39,15 @@ class AttendanceRecordInline(admin.TabularInline):
 
 class CustomUserAdmin(UserAdmin):
     model = User
+    add_form = CustomUserCreationForm
     fieldsets = UserAdmin.fieldsets + (
         ('Custom Fields', {'fields': ('role', 'index_number', 'group', 'device_id', 'device_name')}),
     )
-    add_fieldsets = UserAdmin.add_fieldsets + (
-        ('Custom Fields', {'fields': ('role', 'index_number', 'group', 'device_id', 'device_name')}),
+    add_fieldsets = (
+        (None, {
+            'classes': ('wide',),
+            'fields': ('username', 'email', 'first_name', 'last_name', 'role', 'index_number', 'group', 'password1', 'password2'),
+        }),
     )
     list_display = ['username', 'email', 'first_name', 'last_name', 'role', 'index_number', 'group', 'is_staff']
     list_filter = ['role', 'group', 'is_staff', 'is_superuser']
@@ -168,7 +178,14 @@ class CustomUserAdmin(UserAdmin):
                         user.set_password(password)
 
                         from courses.models import StudentGroup
-                        group = StudentGroup.objects.filter(level__code=level_id).first()
+                        group_raw = find_v(row, ['group', 'student_group', 'group_name', 'class_group'])
+                        group = None
+                        if group_raw:
+                            group = StudentGroup.objects.filter(name__iexact=group_raw, level__code=level_id).first()
+                            if not group:
+                                group = StudentGroup.objects.filter(name__icontains=group_raw).first()
+                        if not group:
+                            group = StudentGroup.objects.filter(level__code=level_id).first()
                         if group:
                             user.group = group
 
