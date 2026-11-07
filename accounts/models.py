@@ -54,8 +54,12 @@ class User(AbstractUser):
         # 1. Lecturers do NOT use index numbers
         if self.role == self.Role.LECTURER or self.is_superuser:
             self.index_number = None
-            if self.email:
-                self.username = self.email
+            # Preserve lecturer's custom name in username field (e.g. "Dr. Michael Asare")
+            if not self.username:
+                self.username = self.email or f"{self.first_name} {self.last_name}".strip()
+            # If first_name is empty, use username as display name
+            if not self.first_name and self.username:
+                self.first_name = self.username
         else:
             # 2. Students and Course Reps HAVE index numbers
             if self.index_number:
@@ -67,17 +71,15 @@ class User(AbstractUser):
                 if prefix.isdigit() and len(prefix) == 10:
                     self.index_number = prefix
 
-            if self.email:
-                self.username = self.email
-            elif self.index_number:
-                self.username = f"{self.index_number}@st.uew.edu.gh"
-                self.email = self.username
+            if not self.username:
+                self.username = self.email or (f"{self.index_number}@st.uew.edu.gh" if self.index_number else '')
 
         super().save(*args, **kwargs)
 
     def __str__(self):
+        display_name = f"{self.first_name} {self.last_name}".strip() or self.username
         if self.role == self.Role.LECTURER:
-            return f"Lecturer: {self.first_name} {self.last_name} ({self.email})"
+            return f"Lecturer: {display_name} ({self.email})"
         elif self.role == self.Role.REP:
-            return f"Course Rep: {self.first_name} {self.last_name} ({self.email})"
-        return f"Student: {self.first_name} {self.last_name} ({self.email})"
+            return f"Course Rep: {display_name} ({self.email})"
+        return f"Student: {display_name} ({self.email})"
