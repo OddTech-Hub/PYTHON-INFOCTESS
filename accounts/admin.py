@@ -1,3 +1,5 @@
+from courses.models import LecturerCourse
+from attendance.models import AttendanceRecord
 import csv
 import io
 from django import forms
@@ -10,6 +12,25 @@ from .models import User
 class CSVImportForm(forms.Form):
     csv_file = forms.FileField()
 
+
+class LecturerCourseInline(admin.TabularInline):
+    model = LecturerCourse
+    fk_name = 'lecturer'
+    extra = 0
+    show_change_link = True
+    verbose_name = "Taught Course"
+    verbose_name_plural = "Taught Courses (Lecturer)"
+
+class AttendanceRecordInline(admin.TabularInline):
+    model = AttendanceRecord
+    extra = 0
+    fields = ['session', 'checked_in_at', 'method', 'receipt_code']
+    readonly_fields = ['session', 'checked_in_at', 'method', 'receipt_code']
+    can_delete = False
+    show_change_link = True
+    verbose_name = "Attendance Record"
+    verbose_name_plural = "Attendance Record History (Student)"
+
 class CustomUserAdmin(UserAdmin):
     model = User
     fieldsets = UserAdmin.fieldsets + (
@@ -21,6 +42,7 @@ class CustomUserAdmin(UserAdmin):
     list_display = ['username', 'email', 'first_name', 'last_name', 'role', 'index_number', 'group', 'is_staff']
     list_filter = ['role', 'group', 'is_staff', 'is_superuser']
     search_fields = ['username', 'email', 'first_name', 'last_name', 'index_number']
+    inlines = [LecturerCourseInline, AttendanceRecordInline]
 
     class Media:
         js = ('admin/js/toggle_fields.js',)
