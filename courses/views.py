@@ -110,19 +110,38 @@ class GroupListView(APIView):
 
     def get(self, request):
         level_id = request.query_params.get('level_id')
-        queryset = StudentGroup.objects.all()
         
         if request.user.role == User.Role.LECTURER:
-            queryset = queryset.filter(models.Q(lecturer=request.user) | models.Q(lecturer__isnull=True))
+            queryset = StudentGroup.objects.filter(lecturer=request.user)
+            if level_id:
+                queryset = queryset.filter(models.Q(level__code__iexact=str(level_id)) | models.Q(level_id=level_id if str(level_id).isdigit() else None))
+            
+            # If lecturer has no groups yet for this level, auto-create Group 1 for them!
+            if not queryset.exists():
+                from core.models import AcademicPeriod
+                period = AcademicPeriod.objects.filter(is_active=True).first() or AcademicPeriod.objects.first()
+                target_lvl = None
+                if level_id:
+                    target_lvl = Level.objects.filter(code__iexact=str(level_id)).first() or Level.objects.filter(id=level_id if str(level_id).isdigit() else None).first()
+                if not target_lvl:
+                    target_lvl = Level.objects.first()
+                if target_lvl and period:
+                    grp, _ = StudentGroup.objects.get_or_create(
+                        name="Group 1",
+                        level=target_lvl,
+                        academic_period=period,
+                        lecturer=request.user
+                    )
+                    queryset = StudentGroup.objects.filter(id=grp.id)
         else:
+            queryset = StudentGroup.objects.all()
             rep_group_ids = get_user_rep_group_ids(request.user)
             if rep_group_ids is not None:
                 queryset = queryset.filter(id__in=rep_group_ids)
+            if level_id:
+                queryset = queryset.filter(models.Q(level__code__iexact=str(level_id)) | models.Q(level_id=level_id if str(level_id).isdigit() else None))
 
-        if level_id:
-            queryset = queryset.filter(level_id=level_id)
-            
-        serializer = StudentGroupSerializer(queryset, many=True)
+        serializer = StudentGroupSerializer(queryset.order_by('name'), many=True)
         return Response({
             'success': True,
             'data': serializer.data
@@ -130,37 +149,59 @@ class GroupListView(APIView):
 
     def post(self, request):
         name = request.data.get('name', '').strip()
-        level_id = request.data.get('level_id')
+        level_id = request.data.get('level_id') or request.query_params.get('level_id')
+        lecturer_id = request.data.get('lecturer_id')
 
-        if not name:
-            return Response({
-                'success': False,
-                'message': 'Group name is required.'
-            }, status=status.HTTP_400_BAD_REQUEST)
+        target_lecturer = request.user
+        if request.user.is_staff and lecturer_id:
+            target_lecturer = User.objects.filter(id=lecturer_id, role=User.Role.LECTURER).first() or request.user
 
         level = None
         if level_id:
-            level = Level.objects.filter(code__iexact=level_id).first()
-            if not level and (isinstance(level_id, int) or (isinstance(level_id, str) and level_id.isdigit())):
-                level = Level.objects.filter(id=level_id).first()
+            level = Level.objects.filter(code__iexact=str(level_id)).first()
+            if not level and (isinstance(level_id, int) or (isinstance(level_id, str) and str(level_id).isdigit())):
+                level = Level.objects.filter(id=int(level_id)).first()
         if not level:
             level = Level.objects.first()
         
         from core.models import AcademicPeriod
-        period = AcademicPeriod.objects.filter(is_active=True).first()
+        period = AcademicPeriod.objects.filter(is_active=True).first() or AcademicPeriod.objects.first()
+
+        # If name not given, auto-calculate next group number for this lecturer e.g. "Group 2"
+        if not name:
+            existing_count = StudentGroup.objects.filter(level=level, lecturer=target_lecturer).count()
+            name = f"Group {existing_count + 1}"
 
         group, created = StudentGroup.objects.get_or_create(
             name=name,
             level=level,
-            lecturer=request.user if request.user.role == User.Role.LECTURER else None,
+            lecturer=target_lecturer if target_lecturer.role == User.Role.LECTURER else None,
             defaults={'academic_period': period}
         )
 
         return Response({
             'success': True,
-            'message': 'Group created successfully.',
+            'message': f'{name} created successfully.',
             'data': StudentGroupSerializer(group).data
         })
+
+    def delete(self, request):
+        group_id = request.data.get('group_id') or request.query_params.get('group_id')
+        if not group_id:
+            return Response({'success': False, 'message': 'group_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        group = StudentGroup.objects.filter(id=group_id).first()
+        if not group:
+            return Response({'success': False, 'message': 'Group not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not request.user.is_staff and group.lecturer != request.user:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Unlink students from this group
+        User.objects.filter(group=group).update(group=None)
+        group.delete()
+
+        return Response({'success': True, 'message': 'Group deleted successfully.'})
 
 
 class StudentListView(APIView):
@@ -171,12 +212,17 @@ class StudentListView(APIView):
         group_id = request.query_params.get('group_id')
         search_query = request.query_params.get('search', '').strip()
 
-        # Users with student role (or rep since reps are technically student users too)
         queryset = User.objects.filter(role__in=[User.Role.STUDENT, User.Role.REP])
 
         rep_group_ids = get_user_rep_group_ids(request.user)
         if rep_group_ids is not None:
             queryset = queryset.filter(group_id__in=rep_group_ids)
+        elif request.user.role == User.Role.LECTURER:
+            lec_groups = StudentGroup.objects.filter(lecturer=request.user)
+            if group_id:
+                queryset = queryset.filter(group_id=group_id)
+            elif lec_groups.exists():
+                queryset = queryset.filter(group__in=lec_groups)
         elif group_id:
             queryset = queryset.filter(group_id=group_id)
         elif level_id:
@@ -189,10 +235,86 @@ class StudentListView(APIView):
                 models.Q(index_number__icontains=search_query)
             )
 
+        queryset = queryset.order_by('first_name', 'last_name', 'username')
         serializer = UserSerializer(queryset, many=True)
         return Response({
             'success': True,
             'data': serializer.data
+        })
+
+    def post(self, request):
+        first_name = request.data.get('first_name', '').strip()
+        last_name = request.data.get('last_name', '').strip()
+        name = request.data.get('name', '').strip()
+        index_number = request.data.get('index_number', '').strip()
+        email = request.data.get('email', '').strip()
+        group_id = request.data.get('group_id')
+        group_name = request.data.get('group_name', '').strip()
+
+        if name and not (first_name and last_name):
+            parts = name.split(' ', 1)
+            first_name = parts[0]
+            last_name = parts[1] if len(parts) > 1 else ''
+
+        if not index_number and email and '@' in email:
+            prefix = email.split('@')[0]
+            if prefix.isdigit():
+                index_number = prefix
+
+        if not index_number:
+            return Response({'success': False, 'message': 'Index number is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not email:
+            email = f"{index_number}@st.uew.edu.gh"
+
+        if not first_name:
+            first_name = "Student"
+        if not last_name:
+            last_name = index_number
+
+        group = None
+        if group_id:
+            group = StudentGroup.objects.filter(id=group_id).first()
+        elif group_name:
+            if request.user.role == User.Role.LECTURER:
+                group = StudentGroup.objects.filter(name__iexact=group_name, lecturer=request.user).first()
+            if not group:
+                group = StudentGroup.objects.filter(name__iexact=group_name).first()
+
+        user = User.objects.filter(index_number=index_number).first() or User.objects.filter(email__iexact=email).first()
+        if user:
+            user.first_name = first_name
+            user.last_name = last_name
+            user.email = email
+            if group:
+                user.group = group
+            user.save()
+            msg = f"Updated student {first_name} {last_name}."
+        else:
+            user = User.objects.create_user(
+                username=email,
+                email=email,
+                password='password123',
+                first_name=first_name,
+                last_name=last_name,
+                index_number=index_number,
+                role=User.Role.STUDENT,
+                must_change_password=True,
+                group=group
+            )
+            msg = f"Added student {first_name} {last_name} to {group.name if group else 'cohort'}."
+
+        return Response({
+            'success': True,
+            'message': msg,
+            'data': {
+                'id': user.id,
+                'name': f"{user.first_name} {user.last_name}",
+                'index': user.index_number,
+                'email': user.email,
+                'group': user.group.name if user.group else "Unassigned",
+                'group_id': user.group_id
+            }
         })
 
 

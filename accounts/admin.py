@@ -46,6 +46,17 @@ class CSVImportForm(forms.Form):
     csv_file = forms.FileField()
 
 
+from courses.models import StudentGroup
+
+class LecturerStudentGroupInline(admin.TabularInline):
+    model = StudentGroup
+    fk_name = 'lecturer'
+    extra = 1
+    show_change_link = True
+    fields = ['name', 'level', 'academic_period']
+    verbose_name = "Assigned Group"
+    verbose_name_plural = "Assigned Student Groups (Lecturer)"
+
 class LecturerCourseInline(admin.TabularInline):
     model = LecturerCourse
     fk_name = 'lecturer'
@@ -88,7 +99,7 @@ class CustomUserAdmin(UserAdmin):
         return obj.username or obj.email
     list_filter = ['role', 'group', 'is_staff', 'is_superuser']
     search_fields = ['username', 'email', 'first_name', 'last_name', 'index_number']
-    inlines = [LecturerCourseInline, AttendanceRecordInline]
+    inlines = [LecturerCourseInline, LecturerStudentGroupInline, AttendanceRecordInline]
 
     class Media:
         js = ('admin/js/toggle_fields.js',)

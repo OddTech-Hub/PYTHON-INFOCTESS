@@ -361,7 +361,11 @@ class StudentBulkImportView(APIView):
                         return str(row_dict[k]).strip()
                 return ''
 
-            default_group = StudentGroup.objects.first()
+            target_group_id = request.data.get('group_id') or request.query_params.get('group_id')
+            explicit_target_group = None
+            if target_group_id:
+                explicit_target_group = StudentGroup.objects.filter(id=target_group_id).first()
+            default_group = explicit_target_group or StudentGroup.objects.first()
             created_count = 0
             updated_count = 0
             skipped_count = 0
@@ -402,7 +406,9 @@ class StudentBulkImportView(APIView):
                 group_obj = default_group
                 group_name = find_val(row, ['group', 'student_group', 'group_name', 'class_group'])
                 level_str = find_val(row, ['level_id', 'level']) or 'L100'
-                if group_name:
+                if explicit_target_group:
+                    group_obj = explicit_target_group
+                elif group_name:
                     found_grp = StudentGroup.objects.filter(name__iexact=group_name, level__code=level_str).first()
                     if not found_grp:
                         found_grp = StudentGroup.objects.filter(name__icontains=group_name).first()

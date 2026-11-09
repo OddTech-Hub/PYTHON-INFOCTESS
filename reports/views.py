@@ -24,11 +24,14 @@ class LevelSummaryView(APIView):
             }, status=status.HTTP_404_NOT_FOUND)
 
         students = User.objects.filter(group__level=level, role__in=[User.Role.STUDENT, User.Role.REP])
-        
-        # Enforce Course Rep group scoping
-        rep_group_ids = get_user_rep_group_ids(request.user)
-        if rep_group_ids is not None:
-            students = students.filter(group_id__in=rep_group_ids)
+        if request.user.role == User.Role.LECTURER:
+            lec_groups = StudentGroup.objects.filter(level=level, lecturer=request.user)
+            if lec_groups.exists():
+                students = students.filter(group__in=lec_groups)
+        else:
+            rep_group_ids = get_user_rep_group_ids(request.user)
+            if rep_group_ids is not None:
+                students = students.filter(group_id__in=rep_group_ids)
 
         courses_qs = Course.objects.filter(level=level)
         if request.user.role == User.Role.LECTURER:
@@ -41,7 +44,19 @@ class LevelSummaryView(APIView):
 
         groups = StudentGroup.objects.filter(level=level)
         if request.user.role == User.Role.LECTURER:
-            groups = groups.filter(models.Q(lecturer=request.user) | models.Q(lecturer__isnull=True))
+            groups = groups.filter(lecturer=request.user)
+            # If lecturer has no groups yet for this level, auto-create Group 1 for them!
+            if not groups.exists():
+                from core.models import AcademicPeriod
+                period = AcademicPeriod.objects.filter(is_active=True).first() or AcademicPeriod.objects.first()
+                if period:
+                    grp, _ = StudentGroup.objects.get_or_create(
+                        name="Group 1",
+                        level=level,
+                        academic_period=period,
+                        lecturer=request.user
+                    )
+                    groups = StudentGroup.objects.filter(id=grp.id)
         elif rep_group_ids is not None:
             groups = groups.filter(id__in=rep_group_ids)
 
@@ -186,11 +201,14 @@ class CourseBreakdownView(APIView):
                 }, status=status.HTTP_404_NOT_FOUND)
 
         students = User.objects.filter(group__level=level, role__in=[User.Role.STUDENT, User.Role.REP])
-
-        # Enforce Course Rep group scoping: Course Reps ONLY see their own group members
-        rep_group_ids = get_user_rep_group_ids(request.user)
-        if rep_group_ids is not None:
-            students = students.filter(group_id__in=rep_group_ids)
+        if request.user.role == User.Role.LECTURER:
+            lec_groups = StudentGroup.objects.filter(level=level, lecturer=request.user)
+            if lec_groups.exists():
+                students = students.filter(group__in=lec_groups)
+        else:
+            rep_group_ids = get_user_rep_group_ids(request.user)
+            if rep_group_ids is not None:
+                students = students.filter(group_id__in=rep_group_ids)
 
         if group_name:
             students = students.filter(group__name=group_name)
@@ -235,6 +253,8 @@ class CourseBreakdownView(APIView):
                 'group': s.group.name if s.group else ""
             })
 
+        # Sort all students alphabetically by name (A to Z)
+        data.sort(key=lambda s: str(s.get('name', '')).lower())
         return Response({
             'success': True,
             'data': data
