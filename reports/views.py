@@ -23,15 +23,14 @@ class LevelSummaryView(APIView):
                 'message': f'Level {level_code} not found.'
             }, status=status.HTTP_404_NOT_FOUND)
 
+        rep_group_ids = get_user_rep_group_ids(request.user)
         students = User.objects.filter(group__level=level, role__in=[User.Role.STUDENT, User.Role.REP])
         if request.user.role == User.Role.LECTURER:
             lec_groups = StudentGroup.objects.filter(level=level, lecturer=request.user)
             if lec_groups.exists():
                 students = students.filter(group__in=lec_groups)
-        else:
-            rep_group_ids = get_user_rep_group_ids(request.user)
-            if rep_group_ids is not None:
-                students = students.filter(group_id__in=rep_group_ids)
+        elif rep_group_ids is not None:
+            students = students.filter(group_id__in=rep_group_ids)
 
         courses_qs = Course.objects.filter(level=level)
         if request.user.role == User.Role.LECTURER:
@@ -200,15 +199,14 @@ class CourseBreakdownView(APIView):
                     'message': 'Level not found.'
                 }, status=status.HTTP_404_NOT_FOUND)
 
+        rep_group_ids = get_user_rep_group_ids(request.user)
         students = User.objects.filter(group__level=level, role__in=[User.Role.STUDENT, User.Role.REP])
         if request.user.role == User.Role.LECTURER:
             lec_groups = StudentGroup.objects.filter(level=level, lecturer=request.user)
             if lec_groups.exists():
                 students = students.filter(group__in=lec_groups)
-        else:
-            rep_group_ids = get_user_rep_group_ids(request.user)
-            if rep_group_ids is not None:
-                students = students.filter(group_id__in=rep_group_ids)
+        elif rep_group_ids is not None:
+            students = students.filter(group_id__in=rep_group_ids)
 
         if group_name:
             students = students.filter(group__name=group_name)
