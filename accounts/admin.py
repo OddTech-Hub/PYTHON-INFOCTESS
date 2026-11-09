@@ -13,7 +13,34 @@ from .models import User
 class CustomUserCreationForm(UserCreationForm):
     class Meta(UserCreationForm.Meta):
         model = User
-        fields = ('username', 'email', 'first_name', 'last_name', 'role', 'index_number', 'group')
+        fields = ('username', 'first_name', 'last_name', 'role', 'index_number', 'group')
+        labels = {
+            'username': 'Username (Email)',
+        }
+        help_texts = {
+            'username': 'Required. Enter the email address used to log in (e.g. lecturer@gmail.com).',
+        }
+
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        if user.username and '@' in user.username:
+            user.email = user.username.strip().lower()
+        if commit:
+            user.save()
+        return user
+
+
+class CustomUserChangeForm(forms.ModelForm):
+    class Meta:
+        model = User
+        fields = '__all__'
+        labels = {
+            'username': 'Username (Email)',
+        }
+        help_texts = {
+            'username': 'Required. Enter the email address used to log in (e.g. lecturer@gmail.com).',
+        }
+
 
 class CSVImportForm(forms.Form):
     csv_file = forms.FileField()
@@ -40,16 +67,25 @@ class AttendanceRecordInline(admin.TabularInline):
 class CustomUserAdmin(UserAdmin):
     model = User
     add_form = CustomUserCreationForm
-    fieldsets = UserAdmin.fieldsets + (
+    form = CustomUserChangeForm
+    fieldsets = (
+        (None, {'fields': ('username', 'password')}),
+        ('Personal info', {'fields': ('first_name', 'last_name')}),
         ('Custom Fields', {'fields': ('role', 'index_number', 'group', 'device_id', 'device_name')}),
+        ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
+        ('Important dates', {'fields': ('last_login', 'date_joined')}),
     )
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
-            'fields': ('username', 'email', 'first_name', 'last_name', 'role', 'index_number', 'group', 'password1', 'password2'),
+            'fields': ('username', 'first_name', 'last_name', 'role', 'index_number', 'group', 'password1', 'password2'),
         }),
     )
-    list_display = ['username', 'email', 'first_name', 'last_name', 'role', 'index_number', 'group', 'is_staff']
+    list_display = ['username_display', 'first_name', 'last_name', 'role', 'index_number', 'group', 'is_staff']
+
+    @admin.display(description="Username (Email)", ordering="username")
+    def username_display(self, obj):
+        return obj.username or obj.email
     list_filter = ['role', 'group', 'is_staff', 'is_superuser']
     search_fields = ['username', 'email', 'first_name', 'last_name', 'index_number']
     inlines = [LecturerCourseInline, AttendanceRecordInline]

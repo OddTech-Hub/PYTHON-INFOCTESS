@@ -47,19 +47,24 @@ class User(AbstractUser):
     )
 
     def save(self, *args, **kwargs):
-        # Normalize email to lowercase
+        # Normalize email and username
         if self.email:
             self.email = self.email.strip().lower()
+        if self.username:
+            self.username = self.username.strip().lower()
 
-        # 1. Lecturers do NOT use index numbers
+        # 1. Lecturers do NOT use index numbers; username IS their email (used to log in)
         if self.role == self.Role.LECTURER or self.is_superuser:
             self.index_number = None
-            # Preserve lecturer's custom name in username field (e.g. "Dr. Michael Asare")
-            if not self.username:
-                self.username = self.email or f"{self.first_name} {self.last_name}".strip()
-            # If first_name is empty, use username as display name
-            if not self.first_name and self.username:
-                self.first_name = self.username
+            if self.email and not self.username:
+                self.username = self.email
+            elif self.username and not self.email:
+                self.email = self.username
+            elif self.email and self.username:
+                if '@' in self.email:
+                    self.username = self.email
+                elif '@' in self.username:
+                    self.email = self.username
         else:
             # 2. Students and Course Reps HAVE index numbers
             if self.index_number:
