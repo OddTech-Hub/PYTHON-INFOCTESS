@@ -34,9 +34,32 @@ class CourseListView(APIView):
 
         if request.user.role == User.Role.LECTURER:
             lecturer_course_ids = LecturerCourse.objects.filter(lecturer=request.user).values_list('course_id', flat=True)
-            queryset = queryset.filter(id__in=lecturer_course_ids)
+            if lecturer_course_ids.exists():
+                lec_qs = queryset.filter(id__in=lecturer_course_ids)
+                if level_id:
+                    if str(level_id).isdigit():
+                        lec_qs_level = lec_qs.filter(models.Q(level_id=int(level_id)) | models.Q(level__code__iexact=str(level_id)))
+                    else:
+                        lec_qs_level = lec_qs.filter(level__code__iexact=str(level_id))
+                    if lec_qs_level.exists():
+                        queryset = lec_qs_level
+                    else:
+                        if str(level_id).isdigit():
+                            queryset = queryset.filter(models.Q(level_id=int(level_id)) | models.Q(level__code__iexact=str(level_id)))
+                        else:
+                            queryset = queryset.filter(level__code__iexact=str(level_id))
+                else:
+                    queryset = lec_qs
+            elif level_id:
+                if str(level_id).isdigit():
+                    queryset = queryset.filter(models.Q(level_id=int(level_id)) | models.Q(level__code__iexact=str(level_id)))
+                else:
+                    queryset = queryset.filter(level__code__iexact=str(level_id))
         elif level_id:
-            queryset = queryset.filter(level_id=level_id)
+            if str(level_id).isdigit():
+                queryset = queryset.filter(models.Q(level_id=int(level_id)) | models.Q(level__code__iexact=str(level_id)))
+            else:
+                queryset = queryset.filter(level__code__iexact=str(level_id))
         elif rep_me == 'me' and request.user.role == User.Role.REP:
             rep_assignments = CourseRep.objects.filter(student=request.user)
             if rep_assignments.exists():
@@ -46,9 +69,6 @@ class CourseListView(APIView):
                 queryset = queryset.filter(level=request.user.group.level)
             else:
                 queryset = Course.objects.all()
-
-        if level_id and request.user.role == User.Role.LECTURER:
-            queryset = queryset.filter(level_id=level_id)
 
         serializer = CourseSerializer(queryset, many=True)
         return Response({
@@ -69,16 +89,17 @@ class CourseListView(APIView):
 
         level = None
         if level_id:
-            level = Level.objects.filter(code__iexact=level_id).first()
-            if not level and (isinstance(level_id, int) or (isinstance(level_id, str) and level_id.isdigit())):
-                level = Level.objects.filter(id=level_id).first()
+            if str(level_id).isdigit():
+                level = Level.objects.filter(id=int(level_id)).first() or Level.objects.filter(code__iexact=str(level_id)).first()
+            else:
+                level = Level.objects.filter(code__iexact=str(level_id)).first()
         if not level:
             level = Level.objects.first()
         
         from core.models import AcademicPeriod
         period = AcademicPeriod.objects.filter(is_active=True).first() or AcademicPeriod.objects.first()
         if not period:
-            period = AcademicPeriod.objects.create(name='2025/2026 Semester 2', is_active=True)
+            period = AcademicPeriod.objects.create(name='2025/2026 Academic Year — Semester 2', is_active=True)
 
         course, created = Course.objects.get_or_create(
             code=code,
@@ -86,7 +107,8 @@ class CourseListView(APIView):
         )
         if not created:
             course.name = name
-            course.level = level
+            if level:
+                course.level = level
             if not course.academic_period:
                 course.academic_period = period
             course.save()
@@ -95,12 +117,12 @@ class CourseListView(APIView):
             LecturerCourse.objects.get_or_create(
                 lecturer=request.user,
                 course=course,
-                academic_period=period
+                defaults={'academic_period': period}
             )
 
         return Response({
             'success': True,
-            'message': 'Course created successfully.',
+            'message': 'Course created and assigned successfully.',
             'data': CourseSerializer(course).data
         })
 
@@ -322,12 +344,21 @@ class CourseDetailView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def delete(self, request, code):
-        course = Course.objects.filter(code__iexact=code).first() or Course.objects.filter(id=code).first()
+        course = Course.objects.filter(code__iexact=code).first()
+        if not course and str(code).isdigit():
+            course = Course.objects.filter(id=int(code)).first()
         if not course:
             return Response({
                 'success': False,
                 'message': 'Course not found.'
             }, status=status.HTTP_404_NOT_FOUND)
+
+        if request.user.role == User.Role.LECTURER:
+            LecturerCourse.objects.filter(lecturer=request.user, course=course).delete()
+            return Response({
+                'success': True,
+                'message': f'Course {course.code} unlinked from your dashboard.'
+            })
 
         course.delete()
         return Response({

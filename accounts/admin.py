@@ -60,8 +60,9 @@ class LecturerStudentGroupInline(admin.TabularInline):
 class LecturerCourseInline(admin.TabularInline):
     model = LecturerCourse
     fk_name = 'lecturer'
-    extra = 0
+    extra = 1
     show_change_link = True
+    fields = ['course', 'academic_period']
     verbose_name = "Taught Course"
     verbose_name_plural = "Taught Courses (Lecturer)"
 

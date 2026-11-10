@@ -32,14 +32,21 @@ class LevelSummaryView(APIView):
         elif rep_group_ids is not None:
             students = students.filter(group_id__in=rep_group_ids)
 
-        courses_qs = Course.objects.filter(level=level)
+        all_level_courses = Course.objects.filter(level=level)
+        courses_qs = all_level_courses
         if request.user.role == User.Role.LECTURER:
             from courses.models import LecturerCourse
             lecturer_course_ids = LecturerCourse.objects.filter(lecturer=request.user).values_list('course_id', flat=True)
-            courses_qs = courses_qs.filter(id__in=lecturer_course_ids)
+            lec_level_courses = courses_qs.filter(id__in=lecturer_course_ids)
+            if lec_level_courses.exists():
+                courses_qs = lec_level_courses
+            elif not lecturer_course_ids.exists():
+                # Lecturer has no specific courses assigned yet; show available level courses so they are never blocked
+                pass
 
         courses_count = courses_qs.count()
         courses_data = [{'id': c.id, 'code': c.code, 'name': c.name} for c in courses_qs]
+        all_courses_data = [{'id': c.id, 'code': c.code, 'name': c.name} for c in all_level_courses]
 
         groups = StudentGroup.objects.filter(level=level)
         if request.user.role == User.Role.LECTURER:
@@ -165,6 +172,7 @@ class LevelSummaryView(APIView):
                     'flagged': flagged_count,
                 },
                 'courses': courses_data,
+                'allCourses': all_courses_data,
                 'groups': [g.name for g in groups],
                 'progress': progress,
                 'groupPieData': group_pie_data,

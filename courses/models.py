@@ -29,10 +29,17 @@ class Course(models.Model):
 class LecturerCourse(models.Model):
     lecturer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='lecturer_courses')
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='lecturers')
-    academic_period = models.ForeignKey(AcademicPeriod, on_delete=models.CASCADE)
+    academic_period = models.ForeignKey(AcademicPeriod, on_delete=models.CASCADE, null=True, blank=True)
 
     class Meta:
         unique_together = ('lecturer', 'course', 'academic_period')
+
+    def save(self, *args, **kwargs):
+        if not self.academic_period_id:
+            period = AcademicPeriod.objects.filter(is_active=True).first() or AcademicPeriod.objects.first()
+            if period:
+                self.academic_period = period
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.lecturer.first_name} {self.lecturer.last_name} teaches {self.course.code}"

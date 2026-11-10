@@ -2,12 +2,13 @@
 {% load i18n admin_urls %}
 
 {% block object-tools-items %}
-    {{ block.super }}
-    {% if original %}
-    <li>
-        <a href="{% url 'admin:courses_studentgroup_import_csv' original.pk %}" class="viewsitelink" style="background: #2563eb; color: white !important; font-weight: 600; padding: 4px 12px; border-radius: 4px;">
-            📥 Import Students CSV into this Group
-        </a>
-    </li>
-    {% endif %}
+{{ block.super }}
+{% if original %}
+<li>
+    riginal.pk %}" class="viewsitelink" style="background: #2563eb; color: white !important; font-weight: 600; padding:
+    4px 12px; border-radius: 4px;">
+    📥 Import Students CSV into this Group
+    </a>
+</li>
+{% endif %}
 {% endblock %}
