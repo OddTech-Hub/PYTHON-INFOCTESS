@@ -40,6 +40,13 @@ class LecturerCourseInline(admin.TabularInline):
     show_change_link = True
 
 
+class StudentGroupInline(admin.TabularInline):
+    model = StudentGroup
+    extra = 0
+    fields = ['name', 'level', 'lecturer', 'academic_period']
+    show_change_link = True
+
+
 class AttendanceSessionInline(admin.TabularInline):
     model = AttendanceSession
     extra = 0
@@ -51,9 +58,9 @@ class AttendanceSessionInline(admin.TabularInline):
 
 @admin.register(StudentGroup)
 class StudentGroupAdmin(admin.ModelAdmin):
-    list_display = ['name', 'level', 'lecturer', 'enrolled_count', 'academic_period']
-    list_filter = ['level', 'academic_period', 'lecturer']
-    search_fields = ['name', 'lecturer__email', 'lecturer__username', 'lecturer__first_name']
+    list_display = ['name', 'course', 'level', 'lecturer', 'enrolled_count', 'academic_period']
+    list_filter = ['course', 'level', 'academic_period', 'lecturer']
+    search_fields = ['name', 'course__code', 'lecturer__email', 'lecturer__username', 'lecturer__first_name']
     inlines = [CourseRepInline, StudentInline]
 
     @admin.display(description="Students Enrolled")
@@ -171,7 +178,7 @@ class CourseAdmin(admin.ModelAdmin):
     list_display = ['code', 'name', 'level', 'academic_period']
     list_filter = ['level', 'academic_period']
     search_fields = ['code', 'name']
-    inlines = [LecturerCourseInline, AttendanceSessionInline]
+    inlines = [LecturerCourseInline, StudentGroupInline, AttendanceSessionInline]
 
 
 @admin.register(LecturerCourse)
@@ -183,6 +190,6 @@ class LecturerCourseAdmin(admin.ModelAdmin):
 
 @admin.register(CourseRep)
 class CourseRepAdmin(admin.ModelAdmin):
-    list_display = ['student', 'group', 'academic_period']
+    list_display = ['student', 'course', 'group', 'academic_period']
     list_filter = ['academic_period']
-    search_fields = ['student__username', 'group__name']
+    search_fields = ['student__username', 'group__name', 'course__code']

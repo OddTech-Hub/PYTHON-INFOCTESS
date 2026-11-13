@@ -60,15 +60,14 @@ class CourseListView(APIView):
                 queryset = queryset.filter(models.Q(level_id=int(level_id)) | models.Q(level__code__iexact=str(level_id)))
             else:
                 queryset = queryset.filter(level__code__iexact=str(level_id))
-        elif rep_me == 'me' and request.user.role == User.Role.REP:
-            rep_assignments = CourseRep.objects.filter(student=request.user)
+        elif request.user.role == User.Role.REP:
+            # Course Reps can ONLY see and access courses they have been specifically assigned to
+            rep_assignments = CourseRep.objects.filter(student=request.user, course__isnull=False)
             if rep_assignments.exists():
-                level_ids = rep_assignments.values_list('group__level_id', flat=True)
-                queryset = queryset.filter(level_id__in=level_ids)
-            elif request.user.group:
-                queryset = queryset.filter(level=request.user.group.level)
+                assigned_course_ids = rep_assignments.values_list('course_id', flat=True)
+                queryset = queryset.filter(id__in=assigned_course_ids)
             else:
-                queryset = Course.objects.all()
+                queryset = Course.objects.none()
 
         serializer = CourseSerializer(queryset, many=True)
         return Response({
@@ -132,13 +131,19 @@ class GroupListView(APIView):
 
     def get(self, request):
         level_id = request.query_params.get('level_id')
+        course_code = request.query_params.get('course_code')
+        course_id = request.query_params.get('course_id')
         
         if request.user.role == User.Role.LECTURER:
             queryset = StudentGroup.objects.filter(lecturer=request.user)
             if level_id:
                 queryset = queryset.filter(models.Q(level__code__iexact=str(level_id)) | models.Q(level_id=level_id if str(level_id).isdigit() else None))
+            if course_code:
+                queryset = queryset.filter(course__code__iexact=str(course_code).strip())
+            elif course_id:
+                queryset = queryset.filter(course_id=course_id)
             
-            # If lecturer has no groups yet for this level, auto-create Group 1 for them!
+            # If lecturer has no groups yet for this level/course, auto-create Group 1 for them!
             if not queryset.exists():
                 from core.models import AcademicPeriod
                 period = AcademicPeriod.objects.filter(is_active=True).first() or AcademicPeriod.objects.first()
@@ -147,9 +152,21 @@ class GroupListView(APIView):
                     target_lvl = Level.objects.filter(code__iexact=str(level_id)).first() or Level.objects.filter(id=level_id if str(level_id).isdigit() else None).first()
                 if not target_lvl:
                     target_lvl = Level.objects.first()
+
+                target_course = None
+                if course_code:
+                    target_course = Course.objects.filter(code__iexact=str(course_code).strip()).first()
+                elif course_id:
+                    target_course = Course.objects.filter(id=course_id).first()
+                if not target_course and target_lvl:
+                    lc = LecturerCourse.objects.filter(lecturer=request.user, course__level=target_lvl).first()
+                    if lc:
+                        target_course = lc.course
+
                 if target_lvl and period:
                     grp, _ = StudentGroup.objects.get_or_create(
                         name="Group 1",
+                        course=target_course,
                         level=target_lvl,
                         academic_period=period,
                         lecturer=request.user
@@ -162,6 +179,10 @@ class GroupListView(APIView):
                 queryset = queryset.filter(id__in=rep_group_ids)
             if level_id:
                 queryset = queryset.filter(models.Q(level__code__iexact=str(level_id)) | models.Q(level_id=level_id if str(level_id).isdigit() else None))
+            if course_code:
+                queryset = queryset.filter(course__code__iexact=str(course_code).strip())
+            elif course_id:
+                queryset = queryset.filter(course_id=course_id)
 
         serializer = StudentGroupSerializer(queryset.order_by('name'), many=True)
         return Response({
@@ -172,7 +193,15 @@ class GroupListView(APIView):
     def post(self, request):
         name = request.data.get('name', '').strip()
         level_id = request.data.get('level_id') or request.query_params.get('level_id')
+        course_code = request.data.get('course_code')
+        course_id = request.data.get('course_id')
         lecturer_id = request.data.get('lecturer_id')
+
+        if name and " - " in name:
+            parts = [p.strip() for p in name.split('-', 1)]
+            if not course_code:
+                course_code = parts[0]
+            name = parts[1]
 
         target_lecturer = request.user
         if request.user.is_staff and lecturer_id:
@@ -185,17 +214,28 @@ class GroupListView(APIView):
                 level = Level.objects.filter(id=int(level_id)).first()
         if not level:
             level = Level.objects.first()
+
+        target_course = None
+        if course_code:
+            target_course = Course.objects.filter(code__iexact=str(course_code).strip()).first()
+        elif course_id:
+            target_course = Course.objects.filter(id=course_id).first()
+        if not target_course and target_lecturer.role == User.Role.LECTURER:
+            lc = LecturerCourse.objects.filter(lecturer=target_lecturer, course__level=level).first()
+            if lc:
+                target_course = lc.course
         
         from core.models import AcademicPeriod
         period = AcademicPeriod.objects.filter(is_active=True).first() or AcademicPeriod.objects.first()
 
-        # If name not given, auto-calculate next group number for this lecturer e.g. "Group 2"
+        # If name not given, auto-calculate next group number for this course & lecturer e.g. "Group 2"
         if not name:
-            existing_count = StudentGroup.objects.filter(level=level, lecturer=target_lecturer).count()
+            existing_count = StudentGroup.objects.filter(course=target_course, level=level, lecturer=target_lecturer).count()
             name = f"Group {existing_count + 1}"
 
         group, created = StudentGroup.objects.get_or_create(
             name=name,
+            course=target_course,
             level=level,
             lecturer=target_lecturer if target_lecturer.role == User.Role.LECTURER else None,
             defaults={'academic_period': period}
@@ -203,7 +243,7 @@ class GroupListView(APIView):
 
         return Response({
             'success': True,
-            'message': f'{name} created successfully.',
+            'message': f'{str(group)} created successfully.',
             'data': StudentGroupSerializer(group).data
         })
 
@@ -298,7 +338,13 @@ class StudentListView(APIView):
         if group_id:
             group = StudentGroup.objects.filter(id=group_id).first()
         elif group_name:
-            if request.user.role == User.Role.LECTURER:
+            if " - " in group_name:
+                c_code, g_name = [p.strip() for p in group_name.split('-', 1)]
+                if request.user.role == User.Role.LECTURER:
+                    group = StudentGroup.objects.filter(course__code__iexact=c_code, name__iexact=g_name, lecturer=request.user).first()
+                if not group:
+                    group = StudentGroup.objects.filter(course__code__iexact=c_code, name__iexact=g_name).first()
+            if not group and request.user.role == User.Role.LECTURER:
                 group = StudentGroup.objects.filter(name__iexact=group_name, lecturer=request.user).first()
             if not group:
                 group = StudentGroup.objects.filter(name__iexact=group_name).first()
@@ -311,6 +357,8 @@ class StudentListView(APIView):
             if group:
                 user.group = group
             user.save()
+            if group:
+                group.members.add(user)
             msg = f"Updated student {first_name} {last_name}."
         else:
             user = User.objects.create_user(
@@ -324,7 +372,9 @@ class StudentListView(APIView):
                 must_change_password=True,
                 group=group
             )
-            msg = f"Added student {first_name} {last_name} to {group.name if group else 'cohort'}."
+            if group:
+                group.members.add(user)
+            msg = f"Added student {first_name} {last_name} to {str(group) if group else 'cohort'}."
 
         return Response({
             'success': True,

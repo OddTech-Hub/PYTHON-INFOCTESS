@@ -5,14 +5,18 @@ from django.conf import settings
 
 class StudentGroup(models.Model):
     name = models.CharField(max_length=50)  # e.g., "Group 1", "Group 2"
+    course = models.ForeignKey('Course', on_delete=models.CASCADE, null=True, blank=True, related_name='student_groups')
     level = models.ForeignKey(Level, on_delete=models.CASCADE, related_name='groups')
     academic_period = models.ForeignKey(AcademicPeriod, on_delete=models.CASCADE, related_name='groups')
     lecturer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name='lecturer_groups')
+    members = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name='enrolled_groups')
 
     class Meta:
-        unique_together = ('name', 'level', 'academic_period', 'lecturer')
+        unique_together = ('name', 'course', 'level', 'academic_period', 'lecturer')
 
     def __str__(self):
+        if self.course:
+            return f"{self.course.code} - {self.name}"
         return f"{self.level.code} - {self.name}"
 
 

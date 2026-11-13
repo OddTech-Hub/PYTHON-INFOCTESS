@@ -48,14 +48,16 @@ class CreateSessionView(APIView):
                 'message': f"Course '{course_id}' not found."
             }, status=status.HTTP_404_NOT_FOUND)
 
-        # Determine student group — Course Reps are strictly forced to their assigned group
+        # Determine student group — Course Reps are strictly forced to their assigned course and group
         group = None
-        if request.user.role == User.Role.REP or CourseRep.objects.filter(student=request.user).exists():
-            rep_assignment = CourseRep.objects.filter(student=request.user).first()
-            if rep_assignment and rep_assignment.group:
-                group = rep_assignment.group
-            elif request.user.group:
-                group = request.user.group
+        if request.user.role == User.Role.REP:
+            rep_assignment = CourseRep.objects.filter(student=request.user, course=course).first()
+            if not rep_assignment:
+                return Response({
+                    'success': False,
+                    'message': f"Access Denied: You are not assigned as a Course Representative for {course.code}. You cannot start an attendance session for this course."
+                }, status=status.HTTP_403_FORBIDDEN)
+            group = rep_assignment.group or request.user.group
         else:
             group_id = request.data.get('group_id')
             if group_id:

@@ -158,13 +158,12 @@ class StudentLoginView(APIView):
                 'message': 'Invalid index number, Gmail, or password.'
             }, status=status.HTTP_401_UNAUTHORIZED)
 
-        # STRICT ROLE ABSTRACTION: Student portal only admits Students
-        if user.role != User.Role.STUDENT:
+        # ROLE ABSTRACTION: Student portal admits Students AND Course Reps (since Course Reps are students who attend class)
+        if user.role not in [User.Role.STUDENT, User.Role.REP]:
             role_title = user.get_role_display()
-            portal_name = "Lecturer Portal" if user.role == User.Role.LECTURER else "Course Rep Portal"
             return Response({
                 'success': False,
-                'message': f"Access Denied: Your account is registered as a {role_title}. You cannot log into the Student Portal. Please use the {portal_name}."
+                'message': f"Access Denied: Your account is registered as a {role_title}. Lecturers cannot log into the Student Portal. Please use the Lecturer Portal."
             }, status=status.HTTP_403_FORBIDDEN)
 
         # Capture and bind student device details

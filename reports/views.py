@@ -51,13 +51,14 @@ class LevelSummaryView(APIView):
         groups = StudentGroup.objects.filter(level=level)
         if request.user.role == User.Role.LECTURER:
             groups = groups.filter(lecturer=request.user)
-            # If lecturer has no groups yet for this level, auto-create Group 1 for them!
+            # If lecturer has no groups yet for this level, auto-create Group 1 for them scoped to their course!
             if not groups.exists():
                 from core.models import AcademicPeriod
                 period = AcademicPeriod.objects.filter(is_active=True).first() or AcademicPeriod.objects.first()
                 if period:
                     grp, _ = StudentGroup.objects.get_or_create(
                         name="Group 1",
+                        course=courses_qs.first(),
                         level=level,
                         academic_period=period,
                         lecturer=request.user
@@ -121,7 +122,7 @@ class LevelSummaryView(APIView):
 
             avg_rate = int(sum(g_rates) / len(g_rates)) if g_rates else 100
             group_pie_data.append({
-                'label': g.name,
+                'label': str(g),
                 'value': g_students.count(),
                 'avg': avg_rate,
                 'color': colors[i % len(colors)]
@@ -173,7 +174,7 @@ class LevelSummaryView(APIView):
                 },
                 'courses': courses_data,
                 'allCourses': all_courses_data,
-                'groups': [g.name for g in groups],
+                'groups': [str(g) for g in groups],
                 'progress': progress,
                 'groupPieData': group_pie_data,
                 'sessions': sessions_data
@@ -217,7 +218,11 @@ class CourseBreakdownView(APIView):
             students = students.filter(group_id__in=rep_group_ids)
 
         if group_name:
-            students = students.filter(group__name=group_name)
+            if " - " in group_name:
+                c_code, g_name = [p.strip() for p in group_name.split('-', 1)]
+                students = students.filter(group__course__code__iexact=c_code, group__name__iexact=g_name)
+            else:
+                students = students.filter(group__name=group_name)
 
         course = None
         if course_code:
@@ -256,7 +261,7 @@ class CourseBreakdownView(APIView):
                 'alertId': alert.id if alert else None,
                 'alertType': alert.alert_type if alert else None,
                 'flagReason': alert.reason if alert else None,
-                'group': s.group.name if s.group else ""
+                'group': str(s.group) if s.group else ""
             })
 
         # Sort all students alphabetically by name (A to Z)
