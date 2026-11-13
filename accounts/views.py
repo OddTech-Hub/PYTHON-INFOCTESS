@@ -361,9 +361,16 @@ class StudentBulkImportView(APIView):
                 return ''
 
             target_group_id = request.data.get('group_id') or request.query_params.get('group_id')
+            target_group_name = request.data.get('group_name') or request.query_params.get('group_name')
             explicit_target_group = None
             if target_group_id:
                 explicit_target_group = StudentGroup.objects.filter(id=target_group_id).first()
+            elif target_group_name:
+                if " - " in target_group_name:
+                    c_code, g_name = [p.strip() for p in target_group_name.split('-', 1)]
+                    explicit_target_group = StudentGroup.objects.filter(course__code__iexact=c_code, name__iexact=g_name).first()
+                if not explicit_target_group:
+                    explicit_target_group = StudentGroup.objects.filter(name__iexact=target_group_name).first()
             default_group = explicit_target_group or StudentGroup.objects.first()
             created_count = 0
             updated_count = 0
@@ -426,6 +433,8 @@ class StudentBulkImportView(APIView):
                         user.group = group_obj
                     user.must_change_password = True
                     user.save()
+                    if group_obj:
+                        group_obj.members.add(user)
                     updated_count += 1
                 else:
                     new_user = User(
@@ -441,6 +450,8 @@ class StudentBulkImportView(APIView):
                     # Default password is set to infoctess123; student must set their own upon first login
                     new_user.set_password('password123')
                     new_user.save()
+                    if group_obj:
+                        group_obj.members.add(new_user)
                     created_count += 1
 
             return Response({

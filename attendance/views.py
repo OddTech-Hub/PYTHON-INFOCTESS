@@ -63,11 +63,17 @@ class CreateSessionView(APIView):
             if group_id:
                 if isinstance(group_id, int) or (isinstance(group_id, str) and group_id.isdigit()):
                     group = StudentGroup.objects.filter(id=int(group_id)).first()
+                if not group and " - " in str(group_id):
+                    c_code, g_name = [p.strip() for p in str(group_id).split('-', 1)]
+                    group = StudentGroup.objects.filter(course__code__iexact=c_code, name__iexact=g_name).first()
                 if not group:
-                    group = StudentGroup.objects.filter(name__iexact=str(group_id).strip()).first()
+                    group = StudentGroup.objects.filter(course=course, name__iexact=str(group_id).strip()).first() or \
+                            StudentGroup.objects.filter(name__iexact=str(group_id).strip()).first()
 
         if not group:
-            group = StudentGroup.objects.filter(level=course.level).first() or StudentGroup.objects.first()
+            group = StudentGroup.objects.filter(course=course, level=course.level).first() or \
+                    StudentGroup.objects.filter(level=course.level).first() or \
+                    StudentGroup.objects.first()
 
         if not group:
             return Response({

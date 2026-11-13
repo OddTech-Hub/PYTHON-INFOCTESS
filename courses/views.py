@@ -433,7 +433,7 @@ class CourseRepView(APIView):
                 'name': f"{rep.student.first_name} {rep.student.last_name}",
                 'index_number': rep.student.index_number or rep.student.username,
                 'email': rep.student.email,
-                'group_name': rep.group.name if rep.group else "Group 1",
+                'group_name': str(rep.group) if rep.group else "Group 1",
                 'level_code': rep.group.level.code if rep.group else "L100",
                 'course_code': rep.course.code if rep.course else "All",
                 'created_by': f"{rep.created_by.first_name} {rep.created_by.last_name}" if rep.created_by else "Admin"
@@ -480,16 +480,23 @@ class CourseRepView(APIView):
                 student.set_password(new_password)
             student.save()
 
+        course = Course.objects.filter(code__iexact=course_code).first() if course_code else None
+
         group = None
         if group_id:
             if isinstance(group_id, int) or (isinstance(group_id, str) and group_id.isdigit()):
                 group = StudentGroup.objects.filter(id=group_id).first()
+            if not group and " - " in str(group_id):
+                c_code, g_name = [p.strip() for p in str(group_id).split('-', 1)]
+                group = StudentGroup.objects.filter(course__code__iexact=c_code, name__iexact=g_name).first()
+            if not group and course:
+                group = StudentGroup.objects.filter(course=course, name__iexact=str(group_id).strip()).first()
             if not group:
                 group = StudentGroup.objects.filter(name__iexact=group_id).first()
+        if not group and course:
+            group = StudentGroup.objects.filter(course=course).first()
         if not group:
             group = StudentGroup.objects.first()
-
-        course = Course.objects.filter(code__iexact=course_code).first() if course_code else None
 
         from core.models import AcademicPeriod
         period = AcademicPeriod.objects.filter(is_active=True).first() or AcademicPeriod.objects.first()
@@ -503,6 +510,9 @@ class CourseRepView(APIView):
             rep_obj.course = course
             rep_obj.created_by = request.user
             rep_obj.save()
+
+        if group:
+            group.members.add(student)
 
         return Response({
             'success': True,
