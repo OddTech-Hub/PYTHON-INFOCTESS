@@ -462,7 +462,11 @@ class CourseRepView(APIView):
         elif email:
             student = User.objects.filter(email__iexact=email).first()
 
+        was_existing_student = student is not None
+
         if not student:
+            if not email and index_number:
+                email = f"{index_number}@st.uew.edu.gh"
             if not email or not first_name:
                 return Response({'success': False, 'message': 'Student email and first name are required to create a Course Rep.'}, status=status.HTTP_400_BAD_REQUEST)
             student = User.objects.create_user(
@@ -472,7 +476,8 @@ class CourseRepView(APIView):
                 first_name=first_name,
                 last_name=last_name,
                 index_number=index_number or email.split('@')[0],
-                role=User.Role.REP
+                role=User.Role.REP,
+                must_change_password=not bool(new_password)
             )
         else:
             student.role = User.Role.REP
@@ -520,7 +525,9 @@ class CourseRepView(APIView):
             'data': {
                 'id': rep_obj.id,
                 'email': student.email,
-                'password': new_password or 'password123'
+                'existing_student': was_existing_student,
+                'password_kept': was_existing_student and not bool(new_password),
+                'password': new_password if new_password else (None if was_existing_student else 'password123')
             }
         })
 
