@@ -5,13 +5,12 @@ import io
 from django import forms
 from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin
-from django.contrib.auth.forms import UserCreationForm
 from django.urls import path, reverse
 from django.shortcuts import render, redirect
 from .models import User
 
-class CustomUserCreationForm(UserCreationForm):
-    class Meta(UserCreationForm.Meta):
+class CustomUserCreationForm(forms.ModelForm):
+    class Meta:
         model = User
         fields = ('username', 'first_name', 'last_name', 'role', 'index_number', 'group')
         labels = {
@@ -25,6 +24,8 @@ class CustomUserCreationForm(UserCreationForm):
         user = super().save(commit=False)
         if user.username and '@' in user.username:
             user.email = user.username.strip().lower()
+        user.set_password('password123')
+        user.must_change_password = True
         if commit:
             user.save()
         return user
@@ -83,17 +84,27 @@ class CustomUserAdmin(UserAdmin):
     fieldsets = (
         (None, {'fields': ('username', 'password')}),
         ('Personal info', {'fields': ('first_name', 'last_name')}),
-        ('Custom Fields', {'fields': ('role', 'index_number', 'group', 'device_id', 'device_name')}),
+        ('Custom Fields', {'fields': ('role', 'index_number', 'group', 'must_change_password', 'device_id', 'device_name')}),
         ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
         ('Important dates', {'fields': ('last_login', 'date_joined')}),
     )
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
-            'fields': ('username', 'first_name', 'last_name', 'role', 'index_number', 'group', 'password1', 'password2'),
+            'description': "New accounts are automatically assigned the general first-time password 'password123' and will be required to choose their own preferred password on their first login.",
+            'fields': ('username', 'first_name', 'last_name', 'role', 'index_number', 'group'),
         }),
     )
     list_display = ['username_display', 'first_name', 'last_name', 'role', 'index_number', 'group', 'is_staff']
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if not change:
+            self.message_user(
+                request,
+                f"Default first-time password 'password123' assigned to {obj.username or obj.email}. They will be prompted to set their own preferred password on first login.",
+                level=messages.INFO,
+            )
 
     @admin.display(description="Username (Email)", ordering="username")
     def username_display(self, obj):

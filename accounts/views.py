@@ -217,15 +217,16 @@ class AdminUserListCreateView(APIView):
 
     def post(self, request):
         email = request.data.get('email', '').strip().lower()
-        password = request.data.get('password', '')
+        raw_password = request.data.get('password', '').strip()
+        password = raw_password or 'password123'
         first_name = request.data.get('first_name', '')
         last_name = request.data.get('last_name', '')
         role = request.data.get('role', User.Role.LECTURER)
 
-        if not email or not password:
+        if not email:
             return Response({
                 'success': False,
-                'message': 'Email and password are required.'
+                'message': 'Email is required.'
             }, status=status.HTTP_400_BAD_REQUEST)
 
         if User.objects.filter(email=email).exists():
@@ -239,7 +240,8 @@ class AdminUserListCreateView(APIView):
             username=email,
             first_name=first_name,
             last_name=last_name,
-            role=role
+            role=role,
+            must_change_password=True
         )
         user.set_password(password)
         user.save()
