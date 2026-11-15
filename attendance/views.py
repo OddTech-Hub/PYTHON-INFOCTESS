@@ -364,13 +364,38 @@ class AlertListView(APIView):
 
     def get(self, request):
         level_id = request.query_params.get('level_id')
-        queryset = DeviceAlert.objects.all().order_by('-detected_at')
+        queryset = DeviceAlert.objects.select_related('student', 'student__group').order_by('-detected_at')
 
         rep_group_ids = get_user_rep_group_ids(request.user)
         if rep_group_ids is not None:
-            queryset = queryset.filter(student__group_id__in=rep_group_ids)
+            queryset = queryset.filter(
+                models.Q(student__group_id__in=rep_group_ids) |
+                models.Q(student__enrolled_groups__id__in=rep_group_ids)
+            ).distinct()
+        elif request.user.role == User.Role.LECTURER:
+            lec_groups = StudentGroup.objects.filter(lecturer=request.user)
+            if level_id:
+                if str(level_id).isdigit():
+                    lec_groups = lec_groups.filter(
+                        models.Q(level_id=int(level_id)) | models.Q(level__code__iexact=str(level_id))
+                    )
+                else:
+                    lec_groups = lec_groups.filter(level__code__iexact=str(level_id))
+            queryset = queryset.filter(
+                models.Q(student__group__in=lec_groups) |
+                models.Q(student__enrolled_groups__in=lec_groups)
+            ).distinct()
         elif level_id:
-            queryset = queryset.filter(student__group__level_id=level_id)
+            if str(level_id).isdigit():
+                queryset = queryset.filter(
+                    models.Q(student__group__level_id=int(level_id)) |
+                    models.Q(student__enrolled_groups__level_id=int(level_id))
+                ).distinct()
+            else:
+                queryset = queryset.filter(
+                    models.Q(student__group__level__code__iexact=str(level_id)) |
+                    models.Q(student__enrolled_groups__level__code__iexact=str(level_id))
+                ).distinct()
 
         serializer = DeviceAlertSerializer(queryset, many=True)
         return Response({

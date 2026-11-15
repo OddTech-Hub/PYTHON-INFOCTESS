@@ -128,23 +128,71 @@ class LevelSummaryView(APIView):
         ordered_groups = sorted(list(groups), key=_natural_group_sort_key)
         groups_count = len(ordered_groups)
 
-        # Calculate student specific attendance rates
+        # Pre-fetch students, group memberships, session counts, and attendance counts in bulk
+        student_list = list(
+            students.only('id', 'group_id', 'first_name', 'last_name', 'index_number', 'email')
+        )
+        student_ids = [s.id for s in student_list]
+        ordered_group_ids = [g.id for g in ordered_groups]
+        level_group_ids = [g.id for g in level_groups]
+        relevant_group_ids = ordered_group_ids if request.user.role == User.Role.LECTURER else (level_group_ids or ordered_group_ids)
+        relevant_group_ids_set = set(relevant_group_ids)
+
+        through_model = StudentGroup.members.through
+        student_groups_map = {sid: set() for sid in student_ids}
+        group_students_map = {gid: set() for gid in ordered_group_ids}
+
+        if student_ids and relevant_group_ids:
+            for sg_id, u_id in through_model.objects.filter(
+                studentgroup_id__in=relevant_group_ids,
+                user_id__in=student_ids
+            ).values_list('studentgroup_id', 'user_id'):
+                if u_id in student_groups_map:
+                    student_groups_map[u_id].add(sg_id)
+                if sg_id in group_students_map:
+                    group_students_map[sg_id].add(u_id)
+
+        for s in student_list:
+            if s.group_id and s.group_id in relevant_group_ids_set:
+                student_groups_map[s.id].add(s.group_id)
+            if s.group_id and s.group_id in group_students_map:
+                group_students_map[s.group_id].add(s.id)
+
+        session_counts_by_group = {}
+        if relevant_group_ids:
+            session_counts_by_group = dict(
+                AttendanceSession.objects.filter(group_id__in=relevant_group_ids)
+                .values('group_id')
+                .annotate(cnt=models.Count('id'))
+                .values_list('group_id', 'cnt')
+            )
+
+        attended_by_student_group = {}
+        if student_ids and relevant_group_ids:
+            for row in (
+                AttendanceRecord.objects.filter(
+                    student_id__in=student_ids,
+                    session__group_id__in=relevant_group_ids
+                )
+                .values('student_id', 'session__group_id')
+                .annotate(cnt=models.Count('id'))
+            ):
+                attended_by_student_group[(row['student_id'], row['session__group_id'])] = row['cnt']
+
+        # Calculate student specific attendance rates without per-student SQL queries
         student_rates = []
         low_attendance_count = 0
         perfect_attendance_count = 0
 
-        for student in students:
-            s_group_ids = list(student.enrolled_groups.filter(level=level).values_list('id', flat=True))
-            if student.group_id and student.group_id not in s_group_ids:
-                s_group_ids.append(student.group_id)
+        for student in student_list:
+            s_group_ids = student_groups_map.get(student.id) or set()
             if request.user.role == User.Role.LECTURER:
-                lec_group_ids = [g.id for g in ordered_groups]
-                s_group_ids = [gid for gid in s_group_ids if gid in lec_group_ids] or lec_group_ids
-            total_sessions = AttendanceSession.objects.filter(group_id__in=s_group_ids).count() if s_group_ids else 0
+                s_group_ids = {gid for gid in s_group_ids if gid in group_students_map} or set(ordered_group_ids)
+            total_sessions = sum(session_counts_by_group.get(gid, 0) for gid in s_group_ids) if s_group_ids else 0
             if total_sessions == 0:
                 rate = 100
             else:
-                attended = AttendanceRecord.objects.filter(student=student, session__group_id__in=s_group_ids).count()
+                attended = sum(attended_by_student_group.get((student.id, gid), 0) for gid in s_group_ids)
                 rate = int((attended / total_sessions) * 100)
 
             student_rates.append(rate)
@@ -156,14 +204,13 @@ class LevelSummaryView(APIView):
         overall_avg = int(sum(student_rates) / len(student_rates)) if student_rates else 100
 
         # Unresolved device alerts in this level (scoped to this cohort)
-        flagged_alerts = DeviceAlert.objects.filter(
-            student__in=students,
-            status='open'
+        flagged_count = (
+            DeviceAlert.objects.filter(student_id__in=student_ids, status='open').count()
+            if student_ids else 0
         )
-        flagged_count = flagged_alerts.count() if students.exists() else 0
 
         # Progress bars
-        student_total = students.count()
+        student_total = len(student_list)
         progress = [
             { 'label': "Overall Attendance", 'value': overall_avg, 'color': "#3b82f6" },
             { 'label': "This Week", 'value': overall_avg if student_total > 0 else 100, 'color': "#10b981" },
@@ -171,25 +218,25 @@ class LevelSummaryView(APIView):
             { 'label': "Perfect Attendance", 'value': int((perfect_attendance_count / student_total * 100)) if student_total > 0 else 0, 'color': "#f59e0b" },
         ]
 
-        # Group pie chart data
+        # Group pie chart data (computed in-memory)
         colors = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444"]
         group_pie_data = []
         for i, g in enumerate(ordered_groups):
-            g_students = students.filter(models.Q(group=g) | models.Q(enrolled_groups=g)).distinct()
+            g_student_ids = group_students_map.get(g.id, set())
             g_rates = []
-            g_total_sessions = AttendanceSession.objects.filter(group=g).count()
-            for s in g_students:
+            g_total_sessions = session_counts_by_group.get(g.id, 0)
+            for sid in g_student_ids:
                 if g_total_sessions == 0:
                     rate = 100
                 else:
-                    attended = AttendanceRecord.objects.filter(student=s, session__group=g).count()
+                    attended = attended_by_student_group.get((sid, g.id), 0)
                     rate = int((attended / g_total_sessions) * 100)
                 g_rates.append(rate)
 
             avg_rate = int(sum(g_rates) / len(g_rates)) if g_rates else 100
             group_pie_data.append({
                 'label': _group_label(g),
-                'value': g_students.count(),
+                'value': len(g_student_ids),
                 'avg': avg_rate,
                 'color': colors[i % len(colors)]
             })
@@ -197,7 +244,9 @@ class LevelSummaryView(APIView):
         # Active & historical sessions for this level
         all_sessions = AttendanceSession.objects.filter(
             group__level=level
-        ).select_related('course', 'group', 'group__lecturer').order_by('-opened_at')
+        ).select_related('course', 'group', 'group__lecturer').annotate(
+            checkin_count=models.Count('records')
+        ).order_by('-opened_at')
 
         if request.user.role == User.Role.LECTURER:
             lec_group_ids = [g.id for g in ordered_groups]
@@ -230,9 +279,10 @@ class LevelSummaryView(APIView):
                 'group_display': _group_label(s.group),
                 'lecturer_name': lec_name,
                 'time_window': s.time_window_minutes,
+                'checkin_count': getattr(s, 'checkin_count', 0),
                 'checked_in': rec is not None,
                 'checked_in_at': rec.checked_in_at.isoformat() if (rec and rec.checked_in_at) else None,
-                'record_status': rec.status if rec else ('Pending' if s.status == 'active' else 'Absent'),
+                'record_status': getattr(rec, 'status', 'Present') if rec else ('Pending' if s.status == 'active' else 'Absent'),
                 'receipt_code': rec.receipt_code if rec else None,
                 'method': rec.method if rec else None,
             }
@@ -346,36 +396,85 @@ class CourseBreakdownView(APIView):
         if course_code:
             course = Course.objects.filter(code=course_code, level=level).first()
 
-        # Serialize students with their attendance for this specific course or level
+        # Serialize students with their attendance for this specific course or level (bulk pre-fetched)
         data = []
-        scoped_group_ids = list(scoped_groups.values_list('id', flat=True))
-        for s in students:
-            s_groups = list(
-                StudentGroup.objects.filter(id__in=scoped_group_ids)
-                .filter(models.Q(id=s.group_id) | models.Q(members=s))
-                .select_related('course', 'level')
-                .distinct()
+        scoped_groups_list = sorted(
+            list(scoped_groups.select_related('course', 'level')),
+            key=_natural_group_sort_key
+        )
+        scoped_group_by_id = {g.id: g for g in scoped_groups_list}
+        scoped_group_ids = list(scoped_group_by_id.keys())
+        selected_group_ids = (
+            list(selected_group_objs.values_list('id', flat=True))
+            if selected_group_objs is not None else None
+        )
+
+        student_list = list(students.select_related('group', 'group__course', 'group__level'))
+        student_ids = [s.id for s in student_list]
+
+        through_model = StudentGroup.members.through
+        student_group_ids_map = {sid: [] for sid in student_ids}
+        if student_ids and scoped_group_ids:
+            m2m_sets = {sid: set() for sid in student_ids}
+            for sg_id, u_id in through_model.objects.filter(
+                studentgroup_id__in=scoped_group_ids,
+                user_id__in=student_ids
+            ).values_list('studentgroup_id', 'user_id'):
+                if u_id in m2m_sets:
+                    m2m_sets[u_id].add(sg_id)
+            for s in student_list:
+                if s.group_id and s.group_id in scoped_group_by_id:
+                    m2m_sets[s.id].add(s.group_id)
+                student_group_ids_map[s.id] = [
+                    g.id for g in scoped_groups_list if g.id in m2m_sets[s.id]
+                ]
+
+        all_candidate_group_ids = set(scoped_group_ids)
+        if selected_group_ids:
+            all_candidate_group_ids.update(selected_group_ids)
+        for s in student_list:
+            if s.group_id:
+                all_candidate_group_ids.add(s.group_id)
+
+        session_counts_by_group = {}
+        if all_candidate_group_ids:
+            sess_qs = AttendanceSession.objects.filter(group_id__in=all_candidate_group_ids)
+            if course:
+                sess_qs = sess_qs.filter(course=course)
+            session_counts_by_group = dict(
+                sess_qs.values('group_id').annotate(cnt=models.Count('id')).values_list('group_id', 'cnt')
             )
-            if selected_group_objs is not None:
-                sess_group_ids = list(selected_group_objs.values_list('id', flat=True))
+
+        attended_by_student_group = {}
+        if student_ids and all_candidate_group_ids:
+            rec_qs = AttendanceRecord.objects.filter(
+                student_id__in=student_ids,
+                session__group_id__in=all_candidate_group_ids
+            )
+            if course:
+                rec_qs = rec_qs.filter(session__course=course)
+            for row in rec_qs.values('student_id', 'session__group_id').annotate(cnt=models.Count('id')):
+                attended_by_student_group[(row['student_id'], row['session__group_id'])] = row['cnt']
+
+        alerts_by_student = {}
+        if student_ids:
+            for al in DeviceAlert.objects.filter(student_id__in=student_ids, status='open').order_by('-id'):
+                if al.student_id not in alerts_by_student:
+                    alerts_by_student[al.student_id] = al
+
+        for s in student_list:
+            s_group_ids = student_group_ids_map.get(s.id, [])
+            s_groups = [scoped_group_by_id[gid] for gid in s_group_ids if gid in scoped_group_by_id]
+            if selected_group_ids is not None:
+                sess_group_ids = selected_group_ids
             else:
-                sess_group_ids = [g.id for g in s_groups] if s_groups else ([s.group_id] if s.group_id else [])
+                sess_group_ids = s_group_ids if s_group_ids else ([s.group_id] if s.group_id else [])
 
-            sessions_query = AttendanceSession.objects.filter(group_id__in=sess_group_ids)
-            if course:
-                sessions_query = sessions_query.filter(course=course)
-
-            total_sessions = sessions_query.count()
-
-            records_query = AttendanceRecord.objects.filter(student=s, session__group_id__in=sess_group_ids)
-            if course:
-                records_query = records_query.filter(session__course=course)
-
-            attended = records_query.count()
+            total_sessions = sum(session_counts_by_group.get(gid, 0) for gid in sess_group_ids)
+            attended = sum(attended_by_student_group.get((s.id, gid), 0) for gid in sess_group_ids)
             rate = int((attended / total_sessions) * 100) if total_sessions > 0 else 100
 
-            # Find recent alert if any
-            alert = DeviceAlert.objects.filter(student=s, status='open').first()
+            alert = alerts_by_student.get(s.id)
             group_labels = [_group_label(g) for g in s_groups]
 
             data.append({

@@ -20,35 +20,58 @@ class LevelListView(APIView):
         data = serializer.data
 
         if request.user.role == User.Role.LECTURER:
-            from attendance.models import AttendanceRecord
+            from attendance.models import DeviceAlert
+            course_counts = dict(
+                LecturerCourse.objects.filter(lecturer=request.user)
+                .values('course__level_id')
+                .annotate(cnt=models.Count('id'))
+                .values_list('course__level_id', 'cnt')
+            )
+            lec_group_rows = list(
+                StudentGroup.objects.filter(lecturer=request.user).values_list('id', 'level_id')
+            )
+            groups_by_level = {}
+            all_lec_group_ids = []
+            for gid, lid in lec_group_rows:
+                groups_by_level.setdefault(lid, []).append(gid)
+                all_lec_group_ids.append(gid)
+
+            students_by_level = {item.get('id'): set() for item in data}
+            flagged_student_ids = set()
+            if all_lec_group_ids:
+                group_to_level = {gid: lid for gid, lid in lec_group_rows}
+                through_model = StudentGroup.members.through
+                for sg_id, u_id in through_model.objects.filter(
+                    studentgroup_id__in=all_lec_group_ids
+                ).values_list('studentgroup_id', 'user_id'):
+                    lid = group_to_level.get(sg_id)
+                    if lid in students_by_level:
+                        students_by_level[lid].add(u_id)
+
+                for u_id, g_id in User.objects.filter(
+                    role__in=[User.Role.STUDENT, User.Role.REP],
+                    group_id__in=all_lec_group_ids
+                ).values_list('id', 'group_id'):
+                    lid = group_to_level.get(g_id)
+                    if lid in students_by_level:
+                        students_by_level[lid].add(u_id)
+
+                all_student_ids = set().union(*students_by_level.values()) if students_by_level else set()
+                if all_student_ids:
+                    flagged_student_ids = set(
+                        DeviceAlert.objects.filter(student_id__in=all_student_ids, status='open')
+                        .values_list('student_id', flat=True)
+                    )
+
             enriched = []
             for item in data:
                 lvl_id = item.get('id')
-                courses_count = LecturerCourse.objects.filter(
-                    lecturer=request.user, course__level_id=lvl_id
-                ).count()
-                lec_groups = StudentGroup.objects.filter(
-                    lecturer=request.user, level_id=lvl_id
-                )
-                groups_count = lec_groups.count()
-                students_qs = User.objects.filter(
-                    role__in=[User.Role.STUDENT, User.Role.REP]
-                ).filter(
-                    models.Q(group__in=lec_groups) | models.Q(enrolled_groups__in=lec_groups)
-                ).distinct()
-                students_count = students_qs.count() if groups_count > 0 else 0
-                flagged_count = 0
-                if students_count > 0:
-                    flagged_count = AttendanceRecord.objects.filter(
-                        student__in=students_qs,
-                        session__course__level_id=lvl_id,
-                        status='Flagged'
-                    ).values('student_id').distinct().count()
+                lvl_students = students_by_level.get(lvl_id, set())
                 row = dict(item)
-                row['courses_count'] = courses_count
-                row['groups_count'] = groups_count
-                row['studentsCount'] = students_count
-                row['flaggedCount'] = flagged_count
+                row['courses_count'] = course_counts.get(lvl_id, 0)
+                row['groups_count'] = len(groups_by_level.get(lvl_id, []))
+                row['studentsCount'] = len(lvl_students)
+                row['flaggedCount'] = len(lvl_students & flagged_student_ids)
                 enriched.append(row)
             data = enriched
 
