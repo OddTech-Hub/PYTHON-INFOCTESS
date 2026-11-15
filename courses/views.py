@@ -17,9 +17,44 @@ class LevelListView(APIView):
     def get(self, request):
         levels = Level.objects.all()
         serializer = LevelSerializer(levels, many=True)
+        data = serializer.data
+
+        if request.user.role == User.Role.LECTURER:
+            from attendance.models import AttendanceRecord
+            enriched = []
+            for item in data:
+                lvl_id = item.get('id')
+                courses_count = LecturerCourse.objects.filter(
+                    lecturer=request.user, course__level_id=lvl_id
+                ).count()
+                lec_groups = StudentGroup.objects.filter(
+                    lecturer=request.user, level_id=lvl_id
+                )
+                groups_count = lec_groups.count()
+                students_qs = User.objects.filter(
+                    role__in=[User.Role.STUDENT, User.Role.REP]
+                ).filter(
+                    models.Q(group__in=lec_groups) | models.Q(enrolled_groups__in=lec_groups)
+                ).distinct()
+                students_count = students_qs.count() if groups_count > 0 else 0
+                flagged_count = 0
+                if students_count > 0:
+                    flagged_count = AttendanceRecord.objects.filter(
+                        student__in=students_qs,
+                        session__course__level_id=lvl_id,
+                        status='Flagged'
+                    ).values('student_id').distinct().count()
+                row = dict(item)
+                row['courses_count'] = courses_count
+                row['groups_count'] = groups_count
+                row['studentsCount'] = students_count
+                row['flaggedCount'] = flagged_count
+                enriched.append(row)
+            data = enriched
+
         return Response({
             'success': True,
-            'data': serializer.data
+            'data': data
         })
 
 
@@ -33,24 +68,10 @@ class CourseListView(APIView):
         queryset = Course.objects.all()
 
         if request.user.role == User.Role.LECTURER:
+            # Strictly scope courses to those explicitly assigned to this lecturer for the requested level
             lecturer_course_ids = LecturerCourse.objects.filter(lecturer=request.user).values_list('course_id', flat=True)
-            if lecturer_course_ids.exists():
-                lec_qs = queryset.filter(id__in=lecturer_course_ids)
-                if level_id:
-                    if str(level_id).isdigit():
-                        lec_qs_level = lec_qs.filter(models.Q(level_id=int(level_id)) | models.Q(level__code__iexact=str(level_id)))
-                    else:
-                        lec_qs_level = lec_qs.filter(level__code__iexact=str(level_id))
-                    if lec_qs_level.exists():
-                        queryset = lec_qs_level
-                    else:
-                        if str(level_id).isdigit():
-                            queryset = queryset.filter(models.Q(level_id=int(level_id)) | models.Q(level__code__iexact=str(level_id)))
-                        else:
-                            queryset = queryset.filter(level__code__iexact=str(level_id))
-                else:
-                    queryset = lec_qs
-            elif level_id:
+            queryset = queryset.filter(id__in=lecturer_course_ids)
+            if level_id:
                 if str(level_id).isdigit():
                     queryset = queryset.filter(models.Q(level_id=int(level_id)) | models.Q(level__code__iexact=str(level_id)))
                 else:
@@ -163,7 +184,7 @@ class GroupListView(APIView):
                     if lc:
                         target_course = lc.course
 
-                if target_lvl and period:
+                if target_lvl and target_course and period:
                     grp, _ = StudentGroup.objects.get_or_create(
                         name="Group 1",
                         course=target_course,
@@ -184,23 +205,33 @@ class GroupListView(APIView):
             elif course_id:
                 queryset = queryset.filter(course_id=course_id)
 
-        serializer = StudentGroupSerializer(queryset.order_by('name'), many=True)
+        import re
+        def group_sort_key(g):
+            m = re.search(r'(\d+)\s*$', g.name or '')
+            num = int(m.group(1)) if m else 999999
+            c_code = g.course.code if g.course else ''
+            return (c_code, num, g.name or '')
+
+        ordered_groups = sorted(list(queryset.select_related('course', 'level')), key=group_sort_key)
+        serializer = StudentGroupSerializer(ordered_groups, many=True)
         return Response({
             'success': True,
             'data': serializer.data
         })
 
     def post(self, request):
-        name = request.data.get('name', '').strip()
+        import re
+        name = (request.data.get('name') or '').strip()
+        auto_increment = bool(request.data.get('auto_increment'))
         level_id = request.data.get('level_id') or request.query_params.get('level_id')
         course_code = request.data.get('course_code')
         course_id = request.data.get('course_id')
         lecturer_id = request.data.get('lecturer_id')
 
+        prefix_hint = ''
         if name and " - " in name:
             parts = [p.strip() for p in name.split('-', 1)]
-            if not course_code:
-                course_code = parts[0]
+            prefix_hint = parts[0]
             name = parts[1]
 
         target_lecturer = request.user
@@ -212,6 +243,8 @@ class GroupListView(APIView):
             level = Level.objects.filter(code__iexact=str(level_id)).first()
             if not level and (isinstance(level_id, int) or (isinstance(level_id, str) and str(level_id).isdigit())):
                 level = Level.objects.filter(id=int(level_id)).first()
+        if not level and prefix_hint:
+            level = Level.objects.filter(code__iexact=prefix_hint).first()
         if not level:
             level = Level.objects.first()
 
@@ -220,30 +253,57 @@ class GroupListView(APIView):
             target_course = Course.objects.filter(code__iexact=str(course_code).strip()).first()
         elif course_id:
             target_course = Course.objects.filter(id=course_id).first()
+        elif prefix_hint:
+            target_course = Course.objects.filter(code__iexact=prefix_hint).first()
+
         if not target_course and target_lecturer.role == User.Role.LECTURER:
             lc = LecturerCourse.objects.filter(lecturer=target_lecturer, course__level=level).first()
             if lc:
                 target_course = lc.course
-        
+
+        if not target_course and target_lecturer.role == User.Role.LECTURER:
+            return Response({
+                'success': False,
+                'message': f'You have no course assigned in {level.code if level else "this level"}.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Ensure course level matches the course itself if available
+        if target_course and target_course.level:
+            level = target_course.level
+
         from core.models import AcademicPeriod
         period = AcademicPeriod.objects.filter(is_active=True).first() or AcademicPeriod.objects.first()
 
-        # If name not given, auto-calculate next group number for this course & lecturer e.g. "Group 2"
-        if not name:
-            existing_count = StudentGroup.objects.filter(course=target_course, level=level, lecturer=target_lecturer).count()
-            name = f"Group {existing_count + 1}"
+        scoped_lecturer = target_lecturer if target_lecturer.role == User.Role.LECTURER else None
+        existing_qs = StudentGroup.objects.filter(
+            course=target_course,
+            level=level,
+            lecturer=scoped_lecturer
+        )
+
+        # Sequential auto-numbering: Group 1, Group 2, Group 3, ...
+        if not name or auto_increment:
+            max_num = 0
+            for existing_grp in existing_qs:
+                match = re.search(r'(\d+)\s*$', existing_grp.name or '')
+                if match:
+                    max_num = max(max_num, int(match.group(1)))
+            next_num = max(max_num + 1, existing_qs.count() + 1)
+            while existing_qs.filter(name__iexact=f"Group {next_num}").exists():
+                next_num += 1
+            name = f"Group {next_num}"
 
         group, created = StudentGroup.objects.get_or_create(
             name=name,
             course=target_course,
             level=level,
-            lecturer=target_lecturer if target_lecturer.role == User.Role.LECTURER else None,
+            lecturer=scoped_lecturer,
             defaults={'academic_period': period}
         )
 
         return Response({
             'success': True,
-            'message': f'{str(group)} created successfully.',
+            'message': f'{StudentGroupSerializer(group).data.get("display_name", str(group))} created successfully.',
             'data': StudentGroupSerializer(group).data
         })
 
@@ -278,17 +338,24 @@ class StudentListView(APIView):
 
         rep_group_ids = get_user_rep_group_ids(request.user)
         if rep_group_ids is not None:
-            queryset = queryset.filter(group_id__in=rep_group_ids)
+            queryset = queryset.filter(models.Q(group_id__in=rep_group_ids) | models.Q(enrolled_groups__id__in=rep_group_ids)).distinct()
         elif request.user.role == User.Role.LECTURER:
             lec_groups = StudentGroup.objects.filter(lecturer=request.user)
+            if level_id:
+                lec_groups = lec_groups.filter(
+                    models.Q(level__code__iexact=str(level_id)) |
+                    models.Q(level_id=int(level_id) if str(level_id).isdigit() else None)
+                )
             if group_id:
-                queryset = queryset.filter(group_id=group_id)
-            elif lec_groups.exists():
-                queryset = queryset.filter(group__in=lec_groups)
+                lec_groups = lec_groups.filter(id=group_id)
+            if lec_groups.exists():
+                queryset = queryset.filter(models.Q(group__in=lec_groups) | models.Q(enrolled_groups__in=lec_groups)).distinct()
+            else:
+                queryset = User.objects.none()
         elif group_id:
-            queryset = queryset.filter(group_id=group_id)
+            queryset = queryset.filter(models.Q(group_id=group_id) | models.Q(enrolled_groups__id=group_id)).distinct()
         elif level_id:
-            queryset = queryset.filter(group__level_id=level_id)
+            queryset = queryset.filter(models.Q(group__level_id=level_id) | models.Q(enrolled_groups__level_id=level_id)).distinct()
 
         if search_query:
             queryset = queryset.filter(
@@ -309,25 +376,25 @@ class StudentListView(APIView):
         last_name = request.data.get('last_name', '').strip()
         name = request.data.get('name', '').strip()
         index_number = request.data.get('index_number', '').strip()
-        email = request.data.get('email', '').strip()
+        provided_email = request.data.get('email', '').strip()
         group_id = request.data.get('group_id')
         group_name = request.data.get('group_name', '').strip()
+        level_code = request.data.get('level_code') or request.data.get('level_id') or ''
 
         if name and not (first_name and last_name):
             parts = name.split(' ', 1)
             first_name = parts[0]
             last_name = parts[1] if len(parts) > 1 else ''
 
-        if not index_number and email and '@' in email:
-            prefix = email.split('@')[0]
+        if not index_number and provided_email and '@' in provided_email:
+            prefix = provided_email.split('@')[0]
             if prefix.isdigit():
                 index_number = prefix
 
         if not index_number:
             return Response({'success': False, 'message': 'Index number is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not email:
-            email = f"{index_number}@st.uew.edu.gh"
+        email = provided_email or f"{index_number}@st.uew.edu.gh"
 
         if not first_name:
             first_name = "Student"
@@ -335,31 +402,53 @@ class StudentListView(APIView):
             last_name = index_number
 
         group = None
+        base_group_qs = StudentGroup.objects.all()
+        if request.user.role == User.Role.LECTURER:
+            lec_qs = base_group_qs.filter(lecturer=request.user)
+            if lec_qs.exists():
+                base_group_qs = lec_qs
+        if level_code:
+            lvl_qs = base_group_qs.filter(
+                models.Q(level__code__iexact=str(level_code)) |
+                models.Q(level_id=int(level_code) if str(level_code).isdigit() else None)
+            )
+            if lvl_qs.exists():
+                base_group_qs = lvl_qs
+
         if group_id:
             group = StudentGroup.objects.filter(id=group_id).first()
         elif group_name:
             if " - " in group_name:
                 c_code, g_name = [p.strip() for p in group_name.split('-', 1)]
-                if request.user.role == User.Role.LECTURER:
-                    group = StudentGroup.objects.filter(course__code__iexact=c_code, name__iexact=g_name, lecturer=request.user).first()
+                group = base_group_qs.filter(course__code__iexact=c_code, name__iexact=g_name).first()
+                if not group:
+                    group = base_group_qs.filter(level__code__iexact=c_code, name__iexact=g_name).first()
                 if not group:
                     group = StudentGroup.objects.filter(course__code__iexact=c_code, name__iexact=g_name).first()
-            if not group and request.user.role == User.Role.LECTURER:
-                group = StudentGroup.objects.filter(name__iexact=group_name, lecturer=request.user).first()
+                if not group:
+                    group = StudentGroup.objects.filter(level__code__iexact=c_code, name__iexact=g_name).first()
+            if not group:
+                group = base_group_qs.filter(name__iexact=group_name).first()
             if not group:
                 group = StudentGroup.objects.filter(name__iexact=group_name).first()
 
-        user = User.objects.filter(index_number=index_number).first() or User.objects.filter(email__iexact=email).first()
+        user = User.objects.filter(index_number=index_number).first() or (User.objects.filter(email__iexact=provided_email).first() if provided_email else User.objects.filter(email__iexact=email).first())
         if user:
-            user.first_name = first_name
-            user.last_name = last_name
-            user.email = email
+            if (not user.first_name or user.first_name == "Student") and first_name != "Student":
+                user.first_name = first_name
+            elif first_name and first_name != "Student":
+                user.first_name = first_name
+            if last_name and last_name != index_number:
+                user.last_name = last_name
+            if provided_email and provided_email.lower() != (user.email or '').lower():
+                if not User.objects.filter(email__iexact=provided_email).exclude(id=user.id).exists():
+                    user.email = provided_email
             if group:
                 user.group = group
             user.save()
             if group:
                 group.members.add(user)
-            msg = f"Updated student {first_name} {last_name}."
+            msg = f"Updated student {user.first_name} {user.last_name}."
         else:
             user = User.objects.create_user(
                 username=email,
