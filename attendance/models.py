@@ -18,6 +18,9 @@ class AttendanceSession(models.Model):
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='active')
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='created_sessions')
     qr_data = models.TextField(blank=True, null=True)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    allowed_radius = models.IntegerField(default=50)
 
     def __str__(self):
         return f"{self.session_code} - {self.course.code} ({self.status})"
@@ -28,14 +31,19 @@ class AttendanceRecord(models.Model):
         ('qr_code', 'QR Code'),
         ('session_code', 'Session Code'),
     ]
+    STATUS_CHOICES = [
+        ('confirmed', 'Confirmed'),
+        ('flagged', 'Flagged'),
+    ]
 
     session = models.ForeignKey(AttendanceSession, on_delete=models.CASCADE, related_name='records')
     student = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='attendance_records')
     checked_in_at = models.DateTimeField(auto_now_add=True)
     method = models.CharField(max_length=20, choices=METHOD_CHOICES, default='session_code')
+    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='confirmed')
     device_id = models.CharField(max_length=100, blank=True, null=True)
     device_name = models.CharField(max_length=100, blank=True, null=True)
-    receipt_code = models.CharField(max_length=50, blank=True, null=True, help_text="e.g. ATT-001-GP1")
+    receipt_code = models.CharField(max_length=50, blank=True, null=True, help_text="e.g. ATT-0001-GP1")
 
     class Meta:
         unique_together = ('session', 'student')
@@ -57,6 +65,8 @@ class DeviceAlert(models.Model):
     ]
 
     student = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='device_alerts')
+    session = models.ForeignKey(AttendanceSession, on_delete=models.CASCADE, null=True, blank=True, related_name='device_alerts')
+    attendance_record = models.ForeignKey(AttendanceRecord, on_delete=models.CASCADE, null=True, blank=True, related_name='device_alerts')
     alert_type = models.CharField(max_length=20, choices=ALERT_TYPE_CHOICES)
     reason = models.TextField()
     detected_at = models.DateTimeField(auto_now_add=True)

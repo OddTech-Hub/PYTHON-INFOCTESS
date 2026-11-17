@@ -1,15 +1,20 @@
 import random
-from datetime import datetime
 from django.db import models
 from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
-from courses.models import Course, StudentGroup, CourseRep
+from courses.models import Course, StudentGroup, CourseRep, LecturerCourse
 from courses.helpers import get_user_rep_group_ids, get_rep_scope_q
 from accounts.models import User
 from .models import AttendanceSession, AttendanceRecord, DeviceAlert
 from .serializers import AttendanceSessionSerializer, DeviceAlertSerializer
+from .utils import (
+    validate_rotating_code,
+    haversine_meters,
+    get_session_host_info,
+    assign_next_receipt_code,
+)
 
 
 class CreateSessionView(APIView):
@@ -24,9 +29,22 @@ class CreateSessionView(APIView):
 
         course_id = request.data.get('course_id')
         try:
-            time_window = int(request.data.get('time_window', 10))
+            time_window = max(1, min(180, int(request.data.get('time_window', 10))))
         except (ValueError, TypeError):
             time_window = 10
+
+        try:
+            allowed_radius = max(15, min(1000, int(request.data.get('allowed_radius', 50))))
+        except (ValueError, TypeError):
+            allowed_radius = 50
+
+        lat_raw = request.data.get('latitude', request.data.get('lat'))
+        lng_raw = request.data.get('longitude', request.data.get('lng'))
+        try:
+            session_lat = float(lat_raw) if lat_raw is not None and lat_raw != '' else None
+            session_lng = float(lng_raw) if lng_raw is not None and lng_raw != '' else None
+        except (ValueError, TypeError):
+            session_lat, session_lng = None, None
 
         if not course_id:
             return Response({
@@ -82,9 +100,27 @@ class CreateSessionView(APIView):
                             StudentGroup.objects.filter(name__iexact=str(group_id).strip()).first()
 
         if not group:
-            group = StudentGroup.objects.filter(course=course, level=course.level).first() or \
-                    StudentGroup.objects.filter(level=course.level).first() or \
-                    StudentGroup.objects.first()
+            group = StudentGroup.objects.filter(course=course, lecturer=request.user).first() or \
+                    StudentGroup.objects.filter(course=course, level=course.level).first() or \
+                    StudentGroup.objects.filter(course=course).first()
+
+        if not group and request.user.role == User.Role.LECTURER:
+            from core.models import AcademicPeriod
+            period = AcademicPeriod.objects.filter(is_active=True).first() or AcademicPeriod.objects.first()
+            if not period:
+                period = AcademicPeriod.objects.create(name='2025/2026 Academic Year — Semester 2', is_active=True)
+            group, _ = StudentGroup.objects.get_or_create(
+                name="Group 1",
+                course=course,
+                level=course.level,
+                lecturer=request.user,
+                defaults={'academic_period': period}
+            )
+            LecturerCourse.objects.get_or_create(
+                lecturer=request.user,
+                course=course,
+                defaults={'academic_period': period}
+            )
 
         if not group:
             return Response({
@@ -97,7 +133,7 @@ class CreateSessionView(APIView):
             status='closed', closed_at=timezone.now()
         )
 
-        # Generate unique code
+        # Generate unique base session code
         code = f"ATT-{random.randint(1000, 9999)}"
         while AttendanceSession.objects.filter(session_code=code).exists():
             code = f"ATT-{random.randint(1000, 9999)}"
@@ -112,20 +148,26 @@ class CreateSessionView(APIView):
             time_window_minutes=time_window,
             status='active',
             created_by=request.user,
-            qr_data=qr_payload
+            qr_data=qr_payload,
+            latitude=session_lat,
+            longitude=session_lng,
+            allowed_radius=allowed_radius
         )
 
         # Auto-mark creator as Present if creator is a Course Rep or Student
         if request.user.role in [User.Role.REP, User.Role.STUDENT] or CourseRep.objects.filter(student=request.user).exists():
-            AttendanceRecord.objects.get_or_create(
-                session=session,
-                student=request.user,
-                defaults={
-                    'method': 'session_code',
-                    'device_id': request.user.device_id or 'rep-creator-device',
-                    'device_name': request.user.device_name or 'Course Rep Device'
-                }
-            )
+            existing_creator_rec = AttendanceRecord.objects.filter(session=session, student=request.user).first()
+            if not existing_creator_rec:
+                receipt_code = assign_next_receipt_code(session, request.user)
+                AttendanceRecord.objects.create(
+                    session=session,
+                    student=request.user,
+                    method='session_code',
+                    status='confirmed',
+                    device_id=request.user.device_id or 'rep-creator-device',
+                    device_name=request.user.device_name or 'Course Rep Device',
+                    receipt_code=receipt_code
+                )
 
         serializer = AttendanceSessionSerializer(session)
         return Response({
@@ -165,11 +207,19 @@ class SessionListView(APIView):
         level_id = request.query_params.get('level_id')
         course_id = request.query_params.get('course_id')
 
-        queryset = AttendanceSession.objects.all().order_by('-opened_at')
+        queryset = AttendanceSession.objects.select_related(
+            'course', 'group', 'created_by'
+        ).prefetch_related('records__student').order_by('-opened_at')
 
         # Enforce strict Course Rep (course, group) scoping
         if request.user.role == User.Role.REP:
             queryset = queryset.filter(get_rep_scope_q(request.user, course_field='course_id', group_field='group_id'))
+        elif request.user.role == User.Role.LECTURER:
+            queryset = queryset.filter(
+                models.Q(created_by=request.user) |
+                models.Q(group__lecturer=request.user) |
+                models.Q(course__lecturers__lecturer=request.user)
+            ).distinct()
         else:
             rep_group_ids = get_user_rep_group_ids(request.user)
             if rep_group_ids is not None:
@@ -184,7 +234,11 @@ class SessionListView(APIView):
         if course_id:
             queryset = queryset.filter(course_id=course_id)
 
-        serializer = AttendanceSessionSerializer(queryset, many=True)
+        serializer = AttendanceSessionSerializer(
+            queryset,
+            many=True,
+            context={'hide_code': request.user.role == User.Role.STUDENT}
+        )
         return Response({
             'success': True,
             'data': serializer.data
@@ -242,52 +296,43 @@ class SessionDetailView(APIView):
 
 
 class CheckinView(APIView):
-    # This simulates student check-ins
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
         session_code_raw = request.data.get('session_code', '')
         student_index = request.data.get('index_number')
-        method = request.data.get('method', 'session_code')  # or qr_code
-        device_id = request.data.get('device_id', 'dev-default')
-        device_name = request.data.get('device_name', 'Mobile Phone')
+        method = request.data.get('method', 'session_code')
+        device_id = str(request.data.get('device_id') or '').strip() or 'dev-default'
+        device_name = str(request.data.get('device_name') or 'Mobile Phone').strip()[:100]
 
-        # Clean session code (strip spaces, handle QR payload infoctess://session/ATT-XXXX)
-        session_code = str(session_code_raw).strip()
-        if 'session/' in session_code:
-            session_code = session_code.split('session/')[-1].strip()
-        if '/' in session_code:
-            session_code = session_code.split('/')[-1].strip()
+        lat_raw = request.data.get('lat', request.data.get('latitude'))
+        lng_raw = request.data.get('lng', request.data.get('longitude'))
+        acc_raw = request.data.get('accuracy')
+        try:
+            student_lat = float(lat_raw) if lat_raw is not None and lat_raw != '' else None
+            student_lng = float(lng_raw) if lng_raw is not None and lng_raw != '' else None
+            gps_accuracy = float(acc_raw) if acc_raw is not None and acc_raw != '' else 0.0
+        except (ValueError, TypeError):
+            student_lat, student_lng, gps_accuracy = None, None, 0.0
 
-        # Strict session code match — must be an exact active session code
-        if not session_code:
+        if not str(session_code_raw).strip():
             return Response({
                 'success': False,
                 'message': 'Session code is required.'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.warning(f"[CHECKIN] Received code='{session_code}' from student={student_index}")
-
-        session = AttendanceSession.objects.filter(session_code__iexact=session_code, status='active').first()
-
-        if not session:
-            logger.warning(f"[CHECKIN] REJECTED for code='{session_code}'")
-            return Response({
-                'success': False,
-                'message': 'Invalid session. Please contact your Course Representative or Lecturer.'
-            }, status=status.HTTP_404_NOT_FOUND)
-
-        # Flexible student lookup
+        # Resolve student safely (authenticated student/rep takes precedence)
         student = None
-        if student_index:
+        if request.user.is_authenticated and request.user.role in [User.Role.STUDENT, User.Role.REP]:
+            student = request.user
+        elif student_index:
             student_str = str(student_index).strip()
-            student = User.objects.filter(index_number=student_str).first() or \
-                      User.objects.filter(email__iexact=student_str).first() or \
-                      User.objects.filter(username__iexact=student_str).first()
-
-        if not student and request.user.is_authenticated:
+            student = (
+                User.objects.filter(index_number=student_str).first() or
+                User.objects.filter(email__iexact=student_str).first() or
+                User.objects.filter(username__iexact=student_str).first()
+            )
+        elif request.user.is_authenticated:
             student = request.user
 
         if not student:
@@ -296,68 +341,174 @@ class CheckinView(APIView):
                 'message': 'Student record not found.'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        # Check if already checked in
-        if AttendanceRecord.objects.filter(session=session, student=student).exists():
+        # Validate strictly against currently ACTIVE sessions' live 90s rotating code
+        active_sessions = list(
+            AttendanceSession.objects.filter(status='active')
+            .select_related('course', 'group', 'created_by')
+            .order_by('-opened_at')
+        )
+        matching_sessions = [
+            s for s in active_sessions
+            if validate_rotating_code(session_code_raw, s.session_code)
+        ]
+
+        if not matching_sessions:
             return Response({
                 'success': False,
-                'message': 'Student has already checked in.'
+                'message': 'Invalid or expired session code. Please scan or enter the active code shown on your Lecturer or Course Rep dashboard.'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Prefer an active session matching the student's enrolled group if multiple exist
+        student_group_ids = set(student.enrolled_groups.values_list('id', flat=True))
+        if student.group_id:
+            student_group_ids.add(student.group_id)
+
+        session = next((s for s in matching_sessions if s.group_id in student_group_ids), None)
+        if not session:
+            # If the student belongs to another group in the same course or another class,
+            # use first match if group has no strict enrollment list, else enforce group check
+            candidate = matching_sessions[0]
+            has_roster = candidate.group and (
+                User.objects.filter(group=candidate.group).exists() or
+                candidate.group.members.exists()
+            )
+            if has_roster and student_group_ids and candidate.group_id not in student_group_ids:
+                return Response({
+                    'success': False,
+                    'message': f"This active session is for {candidate.group}, which you are not enrolled in."
+                }, status=status.HTTP_403_FORBIDDEN)
+            session = candidate
+
+        host_display, host_role = get_session_host_info(session)
+
+        # Enforce classroom geofencing if the session recorded classroom GPS coordinates
+        if session.latitude is not None and session.longitude is not None:
+            if student_lat is None or student_lng is None:
+                return Response({
+                    'success': False,
+                    'message': 'Location access is required to verify you are inside the classroom. Please allow GPS access and try again.'
+                }, status=status.HTTP_403_FORBIDDEN)
+            dist_m = haversine_meters(session.latitude, session.longitude, student_lat, student_lng)
+            indoor_tolerance = min(max(gps_accuracy, 0.0), 30.0)
+            allowed_m = (session.allowed_radius or 50) + indoor_tolerance
+            if dist_m > allowed_m:
+                return Response({
+                    'success': False,
+                    'message': f"Outside classroom geofence ({int(round(dist_m))}m from classroom; max allowed {session.allowed_radius or 50}m)."
+                }, status=status.HTTP_403_FORBIDDEN)
+
+        # Check duplicate check-in
+        existing_record = AttendanceRecord.objects.filter(session=session, student=student).first()
+        if existing_record:
+            if existing_record.status == 'flagged':
+                return Response({
+                    'success': True,
+                    'flagged': True,
+                    'status': 'flagged',
+                    'message': 'Your attendance on this shared/new device is already Flagged. Please contact your Lecturer to confirm it before your sequential attendance code is issued.',
+                    'data': {
+                        'name': f"{student.first_name} {student.last_name}".strip(),
+                        'index': student.index_number,
+                        'time': existing_record.checked_in_at.strftime('%I:%M:%S %p'),
+                        'avatar': f"{student.first_name[:1]}{student.last_name[:1]}".upper() or 'ST',
+                        'method': "QR Code" if existing_record.method == 'qr_code' else "Session Code",
+                        'session_code': session.session_code,
+                        'receipt_code': None,
+                        'ref_id': None,
+                        'status': 'flagged',
+                        'flagged': True,
+                        'host': host_display,
+                        'host_role': host_role,
+                        'courseCode': session.course.code if session.course else '',
+                        'courseName': session.course.name if session.course else 'Attendance Session',
+                        'group': session.group.name if session.group else ''
+                    }
+                })
+            return Response({
+                'success': False,
+                'message': f"You have already marked attendance for this session ({existing_record.receipt_code or 'Confirmed'})."
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Update student device binding
-        if device_id:
+        # Shared / changed device check BEFORE mutating student.device_id
+        has_real_device = device_id and device_id != 'dev-default'
+        other_in_session = (
+            AttendanceRecord.objects.filter(session=session, device_id=device_id)
+            .exclude(student=student)
+            .select_related('student')
+            .first()
+            if has_real_device else None
+        )
+        other_bound_user = (
+            User.objects.filter(device_id=device_id).exclude(id=student.id).first()
+            if has_real_device else None
+        )
+        student_changed_device = bool(has_real_device and student.device_id and student.device_id != device_id)
+
+        if other_in_session or other_bound_user or student_changed_device:
+            if other_in_session:
+                alert_type = 'multi_device'
+                reason = f"Device already used in {session.course.code} by {other_in_session.student.first_name} {other_in_session.student.last_name} ({other_in_session.student.index_number})"
+            elif other_bound_user:
+                alert_type = 'multi_device'
+                reason = f"Device is already registered to {other_bound_user.first_name} {other_bound_user.last_name} ({other_bound_user.index_number})"
+            else:
+                alert_type = 'device_change'
+                reason = f"Device changed: {student.device_name or student.device_id} → {device_name}"
+
+            record = AttendanceRecord.objects.create(
+                session=session,
+                student=student,
+                method=method,
+                status='flagged',
+                device_id=device_id,
+                device_name=device_name,
+                receipt_code=None
+            )
+            DeviceAlert.objects.create(
+                student=student,
+                session=session,
+                attendance_record=record,
+                alert_type=alert_type,
+                reason=reason,
+                status='open'
+            )
+
+            return Response({
+                'success': True,
+                'flagged': True,
+                'status': 'flagged',
+                'message': 'This device has already been used or registered by another student. Your attendance has been flagged — contact your Lecturer to confirm it in Device Alerts before your sequential attendance code is issued.',
+                'data': {
+                    'name': f"{student.first_name} {student.last_name}".strip(),
+                    'index': student.index_number,
+                    'time': record.checked_in_at.strftime('%I:%M:%S %p'),
+                    'avatar': f"{student.first_name[:1]}{student.last_name[:1]}".upper() or 'ST',
+                    'method': "QR Code" if method == 'qr_code' else "Session Code",
+                    'session_code': session.session_code,
+                    'receipt_code': None,
+                    'ref_id': None,
+                    'status': 'flagged',
+                    'flagged': True,
+                    'host': host_display,
+                    'host_role': host_role,
+                    'courseCode': session.course.code if session.course else '',
+                    'courseName': session.course.name if session.course else 'Attendance Session',
+                    'group': session.group.name if session.group else ''
+                }
+            })
+
+        # Clean verified device: bind if unregistered, issue atomic 4-digit sequential code
+        if has_real_device and not student.device_id:
             student.device_id = device_id
-        if device_name:
             student.device_name = device_name
-        if device_id or device_name:
             student.save(update_fields=['device_id', 'device_name'])
 
-        # ── Check for device alerts (proxy detection) ──
-        
-        # 1. Multi Device Login / Proxy Attendance Prevention:
-        # Check if another student has already checked in using this device in this session
-        other_checkin = AttendanceRecord.objects.filter(session=session, device_id=device_id).exclude(student=student).first()
-        if other_checkin:
-            reason = f"Proxy attempt: Device already used by {other_checkin.student.first_name} {other_checkin.student.last_name} ({other_checkin.student.index_number})"
-            DeviceAlert.objects.get_or_create(
-                student=student,
-                alert_type='multi_device',
-                reason=reason,
-                status='open'
-            )
-            return Response({
-                'success': False,
-                'message': 'This device has already marked attendance for this session. Proxy attendance is strictly prohibited.'
-            }, status=status.HTTP_403_FORBIDDEN)
-
-        # 2. Device Change:
-        # Check if the student's primary device_id is different from the current device
-        if student.device_id and student.device_id != device_id:
-            reason = f"Device changed: {student.device_name} → {device_name}"
-            DeviceAlert.objects.get_or_create(
-                student=student,
-                alert_type='device_change',
-                reason=reason,
-                status='open'
-            )
-        elif not student.device_id:
-            # Set this as the student's primary device
-            student.device_id = device_id
-            student.device_name = device_name
-            student.save()
-
-        # Generate clean sequential attendance receipt code (e.g. ATT-001-GP1)
-        count = AttendanceRecord.objects.filter(session=session).count() + 1
-        group_tag = ""
-        if session.group:
-            raw_grp = str(session.group.name).upper().replace('GROUP', 'GP').replace(' ', '')
-            group_tag = f"-{raw_grp}"
-        receipt_code = f"ATT-{count:03d}{group_tag}"
-
-        # Record check-in
+        receipt_code = assign_next_receipt_code(session, student)
         record = AttendanceRecord.objects.create(
             session=session,
             student=student,
             method=method,
+            status='confirmed',
             device_id=device_id,
             device_name=device_name,
             receipt_code=receipt_code
@@ -365,16 +516,22 @@ class CheckinView(APIView):
 
         return Response({
             'success': True,
+            'flagged': False,
+            'status': 'confirmed',
             'message': 'Checked in successfully.',
             'data': {
-                'name': f"{student.first_name} {student.last_name}",
+                'name': f"{student.first_name} {student.last_name}".strip(),
                 'index': student.index_number,
                 'time': record.checked_in_at.strftime('%I:%M:%S %p'),
-                'avatar': f"{student.first_name[0]}{student.last_name[0]}".upper(),
+                'avatar': f"{student.first_name[:1]}{student.last_name[:1]}".upper() or 'ST',
                 'method': "QR Code" if method == 'qr_code' else "Session Code",
                 'session_code': session.session_code,
                 'receipt_code': receipt_code,
                 'ref_id': receipt_code,
+                'status': 'confirmed',
+                'flagged': False,
+                'host': host_display,
+                'host_role': host_role,
                 'courseCode': session.course.code if session.course else '',
                 'courseName': session.course.name if session.course else 'Attendance Session',
                 'group': session.group.name if session.group else ''
@@ -386,16 +543,15 @@ class AlertListView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        level_id = request.query_params.get('level_id')
-        queryset = DeviceAlert.objects.select_related('student', 'student__group').order_by('-detected_at')
+        if request.user.role != User.Role.LECTURER and not request.user.is_staff:
+            return Response({'success': True, 'data': []})
 
-        rep_group_ids = get_user_rep_group_ids(request.user)
-        if rep_group_ids is not None:
-            queryset = queryset.filter(
-                models.Q(student__group_id__in=rep_group_ids) |
-                models.Q(student__enrolled_groups__id__in=rep_group_ids)
-            ).distinct()
-        elif request.user.role == User.Role.LECTURER:
+        level_id = request.query_params.get('level_id')
+        queryset = DeviceAlert.objects.select_related(
+            'student', 'student__group', 'session', 'session__course', 'session__created_by', 'attendance_record'
+        ).order_by('-detected_at')
+
+        if request.user.role == User.Role.LECTURER:
             lec_groups = StudentGroup.objects.filter(lecturer=request.user)
             if level_id:
                 if str(level_id).isdigit():
@@ -406,7 +562,9 @@ class AlertListView(APIView):
                     lec_groups = lec_groups.filter(level__code__iexact=str(level_id))
             queryset = queryset.filter(
                 models.Q(student__group__in=lec_groups) |
-                models.Q(student__enrolled_groups__in=lec_groups)
+                models.Q(student__enrolled_groups__in=lec_groups) |
+                models.Q(session__group__in=lec_groups) |
+                models.Q(session__created_by=request.user)
             ).distinct()
         elif level_id:
             if str(level_id).isdigit():
@@ -431,11 +589,19 @@ class AlertActionView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, alert_id):
-        action = request.data.get('action')  # confirm or dismiss
+        if request.user.role != User.Role.LECTURER and not request.user.is_staff:
+            return Response({
+                'success': False,
+                'message': 'Only the Lecturer can confirm or dismiss device alerts.'
+            }, status=status.HTTP_403_FORBIDDEN)
 
-        alert = DeviceAlert.objects.filter(id=alert_id).first()
+        action = request.data.get('action')
+
+        alert = DeviceAlert.objects.select_related('student', 'session', 'attendance_record').filter(id=alert_id).first()
         if not alert:
-            alert = DeviceAlert.objects.filter(student_id=alert_id, status='open').first()
+            alert = DeviceAlert.objects.select_related('student', 'session', 'attendance_record').filter(
+                student_id=alert_id, status='open'
+            ).order_by('-id').first()
 
         if not alert:
             return Response({
@@ -445,25 +611,61 @@ class AlertActionView(APIView):
 
         if action in ['confirm', 'confirmed']:
             alert.status = 'confirmed'
-            alert.save()
+            alert.save(update_fields=['status'])
+
+            # Also confirm any other open alerts for this student/session
+            if alert.session_id:
+                DeviceAlert.objects.filter(
+                    student=alert.student, session_id=alert.session_id, status='open'
+                ).update(status='confirmed')
+
+            rec = alert.attendance_record or AttendanceRecord.objects.filter(
+                student=alert.student, status='flagged'
+            ).order_by('-checked_in_at').first()
+
+            issued_code = None
+            if rec:
+                if not rec.receipt_code:
+                    rec.receipt_code = assign_next_receipt_code(rec.session, rec.student)
+                rec.status = 'confirmed'
+                rec.save(update_fields=['status', 'receipt_code'])
+                issued_code = rec.receipt_code
+
+                if alert.alert_type == 'device_change' and rec.device_id and rec.device_id != 'dev-default':
+                    alert.student.device_id = rec.device_id
+                    alert.student.device_name = rec.device_name
+                    alert.student.save(update_fields=['device_id', 'device_name'])
+
+            return Response({
+                'success': True,
+                'message': f"Alert confirmed{f' — Issued code {issued_code}' if issued_code else ''}.",
+                'data': {'receipt_code': issued_code}
+            })
         elif action in ['dismiss', 'dismissed']:
             alert.status = 'dismissed'
-            alert.save()
+            alert.save(update_fields=['status'])
+            return Response({
+                'success': True,
+                'message': 'Alert marked as dismissed.'
+            })
         else:
             return Response({
                 'success': False,
                 'message': 'Invalid action. Must be confirm or dismiss.'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({
-            'success': True,
-            'message': f'Alert marked as {alert.status}.'
-        })
-
     def delete(self, request, alert_id):
-        alert = DeviceAlert.objects.filter(id=alert_id).first()
+        if request.user.role != User.Role.LECTURER and not request.user.is_staff:
+            return Response({
+                'success': False,
+                'message': 'Only the Lecturer can delete flagged attendance records.'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        alert = DeviceAlert.objects.select_related('attendance_record').filter(id=alert_id).first()
         if not alert:
-            alert = DeviceAlert.objects.filter(student_id=alert_id, status='open').first()
+            alert = DeviceAlert.objects.select_related('attendance_record').filter(
+                student_id=alert_id, status='open'
+            ).order_by('-id').first()
 
         if not alert:
             return Response({
@@ -471,8 +673,15 @@ class AlertActionView(APIView):
                 'message': 'Alert not found.'
             }, status=status.HTTP_404_NOT_FOUND)
 
+        if alert.attendance_record:
+            alert.attendance_record.delete()
+        elif alert.session_id:
+            AttendanceRecord.objects.filter(
+                session_id=alert.session_id, student=alert.student, status='flagged'
+            ).delete()
+
         alert.delete()
         return Response({
             'success': True,
-            'message': 'Alert deleted successfully.'
+            'message': 'Flagged attendance record and alert deleted.'
         })

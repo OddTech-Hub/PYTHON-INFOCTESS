@@ -9,6 +9,7 @@ from courses.models import Course, StudentGroup, CourseRep
 from courses.helpers import get_user_rep_group_ids, get_user_rep_course_ids, get_rep_scope_q
 from accounts.models import User
 from attendance.models import AttendanceSession, AttendanceRecord, DeviceAlert
+from attendance.utils import get_session_host_info
 
 
 def _group_label(g):
@@ -175,7 +176,8 @@ class LevelSummaryView(APIView):
             for row in (
                 AttendanceRecord.objects.filter(
                     student_id__in=student_ids,
-                    session__group_id__in=relevant_group_ids
+                    session__group_id__in=relevant_group_ids,
+                    status='confirmed'
                 )
                 .values('student_id', 'session__group_id')
                 .annotate(cnt=models.Count('id'))
@@ -247,7 +249,7 @@ class LevelSummaryView(APIView):
         # Active & historical sessions for this level
         all_sessions = AttendanceSession.objects.filter(
             group__level=level
-        ).select_related('course', 'group', 'group__lecturer').annotate(
+        ).select_related('course', 'group', 'group__lecturer', 'created_by').annotate(
             checkin_count=models.Count('records')
         ).order_by('-opened_at')
 
@@ -271,6 +273,7 @@ class LevelSummaryView(APIView):
             rec = student_records_map.get(s.id)
             lec_user = s.group.lecturer if (s.group and s.group.lecturer) else None
             lec_name = f"{lec_user.first_name} {lec_user.last_name}".strip() if lec_user else ''
+            host_name, host_role = get_session_host_info(s)
             item = {
                 'id': s.session_code if (s.status != 'active' or not is_student) else f"session-{s.id}",
                 'status': s.status,
@@ -283,12 +286,14 @@ class LevelSummaryView(APIView):
                 'group': s.group.name if s.group else '',
                 'group_display': _group_label(s.group),
                 'lecturer_name': lec_name,
+                'host_name': host_name,
+                'host_role': host_role,
                 'time_window': s.time_window_minutes,
                 'checkin_count': getattr(s, 'checkin_count', 0),
                 'checked_in': rec is not None,
                 'checked_in_at': rec.checked_in_at.isoformat() if (rec and rec.checked_in_at) else None,
-                'record_status': getattr(rec, 'status', 'Present') if rec else ('Pending' if s.status == 'active' else 'Absent'),
-                'receipt_code': rec.receipt_code if rec else None,
+                'record_status': rec.status if rec else ('Pending' if s.status == 'active' else 'Absent'),
+                'receipt_code': rec.receipt_code if (rec and rec.status == 'confirmed') else None,
                 'method': rec.method if rec else None,
             }
             # Conceal active session code and QR payload from students to prevent remote check-ins
@@ -466,7 +471,8 @@ class CourseBreakdownView(APIView):
         if student_ids and all_candidate_group_ids:
             rec_qs = AttendanceRecord.objects.filter(
                 student_id__in=student_ids,
-                session__group_id__in=all_candidate_group_ids
+                session__group_id__in=all_candidate_group_ids,
+                status='confirmed'
             )
             if request.user.role == User.Role.REP:
                 rec_qs = rec_qs.filter(get_rep_scope_q(request.user, course_field='session__course_id', group_field='session__group_id'))
@@ -560,7 +566,7 @@ class CSVExportView(APIView):
                 
                 total = sessions_query.count()
 
-                records_query = AttendanceRecord.objects.filter(student=s)
+                records_query = AttendanceRecord.objects.filter(student=s, status='confirmed')
                 if course:
                     records_query = records_query.filter(session__course=course)
 
