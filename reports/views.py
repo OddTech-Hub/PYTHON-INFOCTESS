@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 from core.models import Level
 from courses.models import Course, StudentGroup, CourseRep
-from courses.helpers import get_user_rep_group_ids
+from courses.helpers import get_user_rep_group_ids, get_user_rep_course_ids, get_rep_scope_q
 from accounts.models import User
 from attendance.models import AttendanceSession, AttendanceRecord, DeviceAlert
 
@@ -72,6 +72,9 @@ class LevelSummaryView(APIView):
             # Strictly scope courses to those explicitly assigned to this lecturer in this level
             lecturer_course_ids = LecturerCourse.objects.filter(lecturer=request.user).values_list('course_id', flat=True)
             courses_qs = courses_qs.filter(id__in=lecturer_course_ids)
+        elif request.user.role == User.Role.REP:
+            rep_course_ids = get_user_rep_course_ids(request.user)
+            courses_qs = courses_qs.filter(id__in=rep_course_ids) if rep_course_ids else Course.objects.none()
         elif is_student:
             student_groups_qs = level_groups.filter(
                 models.Q(id=request.user.group_id) | models.Q(members=request.user)
@@ -251,6 +254,8 @@ class LevelSummaryView(APIView):
         if request.user.role == User.Role.LECTURER:
             lec_group_ids = [g.id for g in ordered_groups]
             all_sessions = all_sessions.filter(models.Q(group_id__in=lec_group_ids) | models.Q(created_by=request.user)).distinct()
+        elif request.user.role == User.Role.REP:
+            all_sessions = all_sessions.filter(get_rep_scope_q(request.user)).distinct()
         elif rep_group_ids is not None:
             all_sessions = all_sessions.filter(models.Q(group_id__in=rep_group_ids) | models.Q(created_by=request.user)).distinct()
         elif is_student and student_groups_qs.exists():
@@ -336,7 +341,17 @@ class CourseBreakdownView(APIView):
         group_name = request.query_params.get('group_name')
 
         if not level_code:
-            if request.user.group and request.user.group.level:
+            if request.user.role == User.Role.REP:
+                rep_ass = CourseRep.objects.filter(student=request.user).select_related('group__level', 'course__level').first()
+                if rep_ass and rep_ass.group and rep_ass.group.level:
+                    level = rep_ass.group.level
+                elif rep_ass and rep_ass.course and rep_ass.course.level:
+                    level = rep_ass.course.level
+                elif request.user.group and request.user.group.level:
+                    level = request.user.group.level
+                else:
+                    level = Level.objects.first()
+            elif request.user.group and request.user.group.level:
                 level = request.user.group.level
             else:
                 rep_ass = CourseRep.objects.filter(student=request.user).first()
@@ -439,6 +454,8 @@ class CourseBreakdownView(APIView):
         session_counts_by_group = {}
         if all_candidate_group_ids:
             sess_qs = AttendanceSession.objects.filter(group_id__in=all_candidate_group_ids)
+            if request.user.role == User.Role.REP:
+                sess_qs = sess_qs.filter(get_rep_scope_q(request.user, course_field='course_id', group_field='group_id'))
             if course:
                 sess_qs = sess_qs.filter(course=course)
             session_counts_by_group = dict(
@@ -451,6 +468,8 @@ class CourseBreakdownView(APIView):
                 student_id__in=student_ids,
                 session__group_id__in=all_candidate_group_ids
             )
+            if request.user.role == User.Role.REP:
+                rec_qs = rec_qs.filter(get_rep_scope_q(request.user, course_field='session__course_id', group_field='session__group_id'))
             if course:
                 rec_qs = rec_qs.filter(session__course=course)
             for row in rec_qs.values('student_id', 'session__group_id').annotate(cnt=models.Count('id')):

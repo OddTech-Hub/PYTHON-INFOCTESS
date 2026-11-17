@@ -6,7 +6,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
 from courses.models import Course, StudentGroup, CourseRep
-from courses.helpers import get_user_rep_group_ids
+from courses.helpers import get_user_rep_group_ids, get_rep_scope_q
 from accounts.models import User
 from .models import AttendanceSession, AttendanceRecord, DeviceAlert
 from .serializers import AttendanceSessionSerializer, DeviceAlertSerializer
@@ -51,13 +51,24 @@ class CreateSessionView(APIView):
         # Determine student group — Course Reps are strictly forced to their assigned course and group
         group = None
         if request.user.role == User.Role.REP:
-            rep_assignment = CourseRep.objects.filter(student=request.user, course=course).first()
-            if not rep_assignment:
+            rep_qs = CourseRep.objects.filter(student=request.user).filter(
+                models.Q(course=course) | models.Q(group__course=course)
+            ).select_related('group')
+            requested_gid = request.data.get('group_id')
+            if requested_gid:
+                if isinstance(requested_gid, int) or str(requested_gid).isdigit():
+                    rep_qs = rep_qs.filter(group_id=int(requested_gid))
+                else:
+                    raw_g = str(requested_gid).strip()
+                    g_part = raw_g.split('-', 1)[1].strip() if ' - ' in raw_g else raw_g
+                    rep_qs = rep_qs.filter(group__name__iexact=g_part)
+            rep_assignment = rep_qs.first()
+            if not rep_assignment or not rep_assignment.group:
                 return Response({
                     'success': False,
-                    'message': f"Access Denied: You are not assigned as a Course Representative for {course.code}. You cannot start an attendance session for this course."
+                    'message': f"Access Denied: You are only permitted to start sessions for your specifically assigned course and group (not {course.code})."
                 }, status=status.HTTP_403_FORBIDDEN)
-            group = rep_assignment.group or request.user.group
+            group = rep_assignment.group
         else:
             group_id = request.data.get('group_id')
             if group_id:
@@ -156,10 +167,13 @@ class SessionListView(APIView):
 
         queryset = AttendanceSession.objects.all().order_by('-opened_at')
 
-        # Enforce Course Rep group scoping
-        rep_group_ids = get_user_rep_group_ids(request.user)
-        if rep_group_ids is not None:
-            queryset = queryset.filter(models.Q(group_id__in=rep_group_ids) | models.Q(created_by=request.user))
+        # Enforce strict Course Rep (course, group) scoping
+        if request.user.role == User.Role.REP:
+            queryset = queryset.filter(get_rep_scope_q(request.user, course_field='course_id', group_field='group_id'))
+        else:
+            rep_group_ids = get_user_rep_group_ids(request.user)
+            if rep_group_ids is not None:
+                queryset = queryset.filter(models.Q(group_id__in=rep_group_ids) | models.Q(created_by=request.user))
 
         if created_by_me == 'me':
             queryset = queryset.filter(created_by=request.user)
@@ -189,12 +203,21 @@ class SessionDetailView(APIView):
                 'message': 'Session not found.'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        rep_group_ids = get_user_rep_group_ids(request.user)
-        if rep_group_ids is not None and session.group_id not in rep_group_ids and session.created_by != request.user:
-            return Response({
-                'success': False,
-                'message': 'You do not have permission to view session details for another class.'
-            }, status=status.HTTP_403_FORBIDDEN)
+        if request.user.role == User.Role.REP:
+            if not AttendanceSession.objects.filter(pk=session.pk).filter(
+                get_rep_scope_q(request.user, course_field='course_id', group_field='group_id')
+            ).exists():
+                return Response({
+                    'success': False,
+                    'message': 'You do not have permission to view session details for another course or group.'
+                }, status=status.HTTP_403_FORBIDDEN)
+        else:
+            rep_group_ids = get_user_rep_group_ids(request.user)
+            if rep_group_ids is not None and session.group_id not in rep_group_ids and session.created_by != request.user:
+                return Response({
+                    'success': False,
+                    'message': 'You do not have permission to view session details for another class.'
+                }, status=status.HTTP_403_FORBIDDEN)
 
         serializer = AttendanceSessionSerializer(session)
         return Response({

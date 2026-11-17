@@ -6,7 +6,7 @@ from core.models import Level
 from core.serializers import LevelSerializer
 from .models import Course, StudentGroup, CourseRep, LecturerCourse
 from .serializers import CourseSerializer, StudentGroupSerializer
-from .helpers import get_user_rep_group_ids
+from .helpers import get_user_rep_group_ids, get_user_rep_course_ids, get_user_rep_assignments
 from accounts.models import User
 from accounts.serializers import UserSerializer
 
@@ -91,27 +91,19 @@ class CourseListView(APIView):
         queryset = Course.objects.all()
 
         if request.user.role == User.Role.LECTURER:
-            # Strictly scope courses to those explicitly assigned to this lecturer for the requested level
+            # Strictly scope courses to those explicitly assigned to this lecturer
             lecturer_course_ids = LecturerCourse.objects.filter(lecturer=request.user).values_list('course_id', flat=True)
             queryset = queryset.filter(id__in=lecturer_course_ids)
-            if level_id:
-                if str(level_id).isdigit():
-                    queryset = queryset.filter(models.Q(level_id=int(level_id)) | models.Q(level__code__iexact=str(level_id)))
-                else:
-                    queryset = queryset.filter(level__code__iexact=str(level_id))
-        elif level_id:
+        elif request.user.role == User.Role.REP:
+            # Course Reps can ONLY see courses they have been specifically assigned to
+            assigned_course_ids = get_user_rep_course_ids(request.user)
+            queryset = queryset.filter(id__in=assigned_course_ids) if assigned_course_ids else Course.objects.none()
+
+        if level_id:
             if str(level_id).isdigit():
                 queryset = queryset.filter(models.Q(level_id=int(level_id)) | models.Q(level__code__iexact=str(level_id)))
             else:
                 queryset = queryset.filter(level__code__iexact=str(level_id))
-        elif request.user.role == User.Role.REP:
-            # Course Reps can ONLY see and access courses they have been specifically assigned to
-            rep_assignments = CourseRep.objects.filter(student=request.user, course__isnull=False)
-            if rep_assignments.exists():
-                assigned_course_ids = rep_assignments.values_list('course_id', flat=True)
-                queryset = queryset.filter(id__in=assigned_course_ids)
-            else:
-                queryset = Course.objects.none()
 
         serializer = CourseSerializer(queryset, many=True)
         return Response({
@@ -533,22 +525,29 @@ class CourseRepView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        queryset = CourseRep.objects.all()
+        queryset = CourseRep.objects.all().select_related('student', 'group', 'group__level', 'course', 'created_by')
         if request.user.role == User.Role.LECTURER:
-            queryset = queryset.filter(models.Q(created_by=request.user) | models.Q(course__lecturers__lecturer=request.user)).distinct()
-        
+            lec_course_ids = LecturerCourse.objects.filter(lecturer=request.user).values_list('course_id', flat=True)
+            lec_group_ids = StudentGroup.objects.filter(lecturer=request.user).values_list('id', flat=True)
+            queryset = queryset.filter(
+                models.Q(created_by=request.user) |
+                models.Q(course_id__in=lec_course_ids) |
+                models.Q(group_id__in=lec_group_ids) |
+                models.Q(course__lecturers__lecturer=request.user)
+            ).distinct()
+
         data = []
         for rep in queryset:
             data.append({
                 'id': rep.id,
                 'student_id': rep.student.id,
-                'name': f"{rep.student.first_name} {rep.student.last_name}",
+                'name': f"{rep.student.first_name} {rep.student.last_name}".strip() or rep.student.username,
                 'index_number': rep.student.index_number or rep.student.username,
                 'email': rep.student.email,
                 'group_name': str(rep.group) if rep.group else "Group 1",
-                'level_code': rep.group.level.code if rep.group else "L100",
+                'level_code': rep.group.level.code if (rep.group and rep.group.level) else "L100",
                 'course_code': rep.course.code if rep.course else "All",
-                'created_by': f"{rep.created_by.first_name} {rep.created_by.last_name}" if rep.created_by else "Admin"
+                'created_by': f"{rep.created_by.first_name} {rep.created_by.last_name}".strip() if rep.created_by else "Admin"
             })
 
         return Response({
@@ -557,89 +556,183 @@ class CourseRepView(APIView):
         })
 
     def post(self, request):
-        student_id = request.data.get('student_id')
-        index_number = request.data.get('index_number', '').strip()
-        email = request.data.get('email', '').strip()
-        first_name = request.data.get('first_name', '').strip()
-        last_name = request.data.get('last_name', '').strip()
-        group_id = request.data.get('group_id')
-        course_code = request.data.get('course_code')
-        new_password = request.data.get('password', '').strip()
+        try:
+            student_id = request.data.get('student_id')
+            index_number = str(request.data.get('index_number') or '').strip()
+            email = str(request.data.get('email') or '').strip().lower()
+            first_name = str(request.data.get('first_name') or '').strip()
+            last_name = str(request.data.get('last_name') or '').strip()
+            group_id = request.data.get('group_id')
+            course_code = str(request.data.get('course_code') or '').strip()
+            new_password = str(request.data.get('password') or '').strip()
 
-        student = None
-        if student_id:
-            student = User.objects.filter(id=student_id).first()
-        elif index_number:
-            student = User.objects.filter(index_number=index_number).first() or User.objects.filter(username=index_number).first()
-        elif email:
-            student = User.objects.filter(email__iexact=email).first()
+            # Flexible student resolution across ID, Index Number, Email, and Username
+            student = None
+            if student_id:
+                student = User.objects.filter(id=student_id).first()
+            if not student and index_number:
+                student = (
+                    User.objects.filter(index_number__iexact=index_number).first() or
+                    User.objects.filter(username__iexact=index_number).first()
+                )
+            if not student and email:
+                student = (
+                    User.objects.filter(email__iexact=email).first() or
+                    User.objects.filter(username__iexact=email).first()
+                )
+            if not student and email and '@' in email:
+                prefix = email.split('@')[0]
+                if prefix.isdigit():
+                    student = User.objects.filter(index_number__iexact=prefix).first()
 
-        was_existing_student = student is not None
+            was_existing_student = student is not None
 
-        if not student:
-            if not email and index_number:
-                email = f"{index_number}@st.uew.edu.gh"
-            if not email or not first_name:
-                return Response({'success': False, 'message': 'Student email and first name are required to create a Course Rep.'}, status=status.HTTP_400_BAD_REQUEST)
-            student = User.objects.create_user(
-                username=email,
-                email=email,
-                password=new_password or 'password123',
-                first_name=first_name,
-                last_name=last_name,
-                index_number=index_number or email.split('@')[0],
-                role=User.Role.REP,
-                must_change_password=not bool(new_password)
-            )
-        else:
-            student.role = User.Role.REP
-            if new_password:
-                student.set_password(new_password)
-            student.save()
+            if not student:
+                if not email and index_number:
+                    email = f"{index_number}@st.uew.edu.gh"
+                if not email or not first_name:
+                    return Response({
+                        'success': False,
+                        'message': 'Student email and first name are required to onboard a Course Rep.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
 
-        course = Course.objects.filter(code__iexact=course_code).first() if course_code else None
+                # Guard against duplicate username or index constraint collisions
+                collision = User.objects.filter(
+                    models.Q(username__iexact=email) |
+                    models.Q(email__iexact=email) |
+                    (models.Q(index_number__iexact=index_number) if index_number else models.Q(id=-1))
+                ).first()
 
-        group = None
-        if group_id:
-            if isinstance(group_id, int) or (isinstance(group_id, str) and group_id.isdigit()):
-                group = StudentGroup.objects.filter(id=group_id).first()
-            if not group and " - " in str(group_id):
-                c_code, g_name = [p.strip() for p in str(group_id).split('-', 1)]
-                group = StudentGroup.objects.filter(course__code__iexact=c_code, name__iexact=g_name).first()
+                if collision:
+                    student = collision
+                    was_existing_student = True
+                else:
+                    target_index = index_number or (email.split('@')[0] if email.split('@')[0].isdigit() else None)
+                    student = User.objects.create_user(
+                        username=email,
+                        email=email,
+                        password=new_password or 'password123',
+                        first_name=first_name,
+                        last_name=last_name,
+                        index_number=target_index,
+                        role=User.Role.REP,
+                        must_change_password=True
+                    )
+
+            if was_existing_student:
+                student.role = User.Role.REP
+                if first_name and (not student.first_name or student.first_name == "Student"):
+                    student.first_name = first_name
+                if last_name and (not student.last_name or student.last_name == student.index_number):
+                    student.last_name = last_name
+                if new_password:
+                    student.set_password(new_password)
+                    student.must_change_password = False
+                student.save()
+
+            # Resolve Course
+            course = None
+            if course_code:
+                course = Course.objects.filter(code__iexact=course_code).first()
+                if not course and course_code.isdigit():
+                    course = Course.objects.filter(id=int(course_code)).first()
+
+            # Resolve Group strictly matching the appointed course when course is provided
+            group = None
+            raw_group_str = str(group_id).strip() if group_id else ""
+            parsed_group_name = raw_group_str
+            if " - " in raw_group_str:
+                _, parsed_group_name = [p.strip() for p in raw_group_str.split('-', 1)]
+
+            if group_id:
+                if isinstance(group_id, int) or raw_group_str.isdigit():
+                    candidate = StudentGroup.objects.filter(id=int(raw_group_str)).first()
+                    if candidate and (not course or candidate.course_id == course.id or candidate.course_id is None):
+                        group = candidate
+                if not group and course:
+                    group = StudentGroup.objects.filter(course=course, name__iexact=parsed_group_name).first()
+                if not group and not course and " - " in raw_group_str:
+                    prefix, g_name = [p.strip() for p in raw_group_str.split('-', 1)]
+                    group = StudentGroup.objects.filter(
+                        models.Q(course__code__iexact=prefix, name__iexact=g_name) |
+                        models.Q(level__code__iexact=prefix, name__iexact=g_name)
+                    ).first()
+                if not group and not course:
+                    group = StudentGroup.objects.filter(name__iexact=raw_group_str).first()
+
+            from core.models import AcademicPeriod
+            period = AcademicPeriod.objects.filter(is_active=True).first() or AcademicPeriod.objects.first()
+
             if not group and course:
-                group = StudentGroup.objects.filter(course=course, name__iexact=str(group_id).strip()).first()
+                target_g_name = parsed_group_name if (parsed_group_name and not parsed_group_name.isdigit()) else "Group 1"
+                group = StudentGroup.objects.filter(course=course, name__iexact=target_g_name).first()
+                if not group:
+                    group, _ = StudentGroup.objects.get_or_create(
+                        name=target_g_name,
+                        course=course,
+                        level=course.level,
+                        lecturer=request.user if request.user.role == User.Role.LECTURER else None,
+                        defaults={'academic_period': period}
+                    )
+
+            # If still no group exists, auto-provision default group for this lecturer
             if not group:
-                group = StudentGroup.objects.filter(name__iexact=group_id).first()
-        if not group and course:
-            group = StudentGroup.objects.filter(course=course).first()
-        if not group:
-            group = StudentGroup.objects.first()
+                target_level = course.level if course else Level.objects.first()
+                target_course = course or Course.objects.filter(level=target_level).first()
+                group, _ = StudentGroup.objects.get_or_create(
+                    name="Group 1",
+                    course=target_course,
+                    level=target_level,
+                    academic_period=period,
+                    lecturer=request.user if request.user.role == User.Role.LECTURER else None
+                )
 
-        from core.models import AcademicPeriod
-        period = AcademicPeriod.objects.filter(is_active=True).first() or AcademicPeriod.objects.first()
+            if not course and group and group.course:
+                course = group.course
 
-        rep_obj, created = CourseRep.objects.get_or_create(
-            student=student,
-            group=group,
-            defaults={'course': course, 'academic_period': period, 'created_by': request.user}
-        )
-        if not created:
-            rep_obj.course = course
-            rep_obj.created_by = request.user
-            rep_obj.save()
+            # Look up or create CourseRep cleanly (avoiding MultipleObjectsReturned or unique collisions)
+            rep_obj = CourseRep.objects.filter(student=student, group=group, course=course).first()
+            if not rep_obj and course:
+                rep_obj = CourseRep.objects.filter(student=student, course=course).first()
+            if not rep_obj:
+                rep_obj = CourseRep.objects.filter(student=student, group=group).first()
 
-        if group:
-            group.members.add(student)
+            if not rep_obj:
+                rep_obj = CourseRep.objects.create(
+                    student=student,
+                    group=group,
+                    course=course,
+                    academic_period=period,
+                    created_by=request.user
+                )
+            else:
+                rep_obj.group = group
+                if course:
+                    rep_obj.course = course
+                rep_obj.created_by = request.user
+                rep_obj.save()
 
-        return Response({
-            'success': True,
-            'message': f'Successfully appointed {student.first_name} {student.last_name} as Course Rep!',
-            'data': {
-                'id': rep_obj.id,
-                'email': student.email,
-                'existing_student': was_existing_student,
-                'password_kept': was_existing_student and not bool(new_password),
-                'password': new_password if new_password else (None if was_existing_student else 'password123')
-            }
-        })
+            if group:
+                group.members.add(student)
+                if not student.group:
+                    student.group = group
+                    student.save(update_fields=['group'])
+
+            return Response({
+                'success': True,
+                'message': f'Successfully appointed {student.first_name} {student.last_name} as Course Rep!',
+                'data': {
+                    'id': rep_obj.id,
+                    'email': student.email or student.username,
+                    'index_number': student.index_number,
+                    'existing_student': was_existing_student,
+                    'password_kept': was_existing_student and not bool(new_password),
+                    'password': new_password if new_password else (None if was_existing_student else 'password123')
+                }
+            })
+        except Exception as e:
+            return Response({
+                'success': False,
+                'message': f'Failed to appoint Course Rep: {str(e)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
