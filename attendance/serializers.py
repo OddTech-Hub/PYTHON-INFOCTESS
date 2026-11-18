@@ -1,6 +1,7 @@
+from datetime import timedelta
 from rest_framework import serializers
 from .models import AttendanceSession, AttendanceRecord, DeviceAlert
-from .utils import get_session_host_info
+from .utils import get_session_host_info, get_session_remaining_seconds
 
 
 class AttendanceRecordSerializer(serializers.ModelSerializer):
@@ -29,7 +30,11 @@ class AttendanceRecordSerializer(serializers.ModelSerializer):
         return f"{first}{last}".upper() or "ST"
 
     def get_method(self, obj):
-        return "QR Code" if obj.method == 'qr_code' else "Session Code"
+        if obj.method == 'qr_code':
+            return "QR Code"
+        if obj.method == 'manual_lecturer':
+            return "Manual (Lecturer)"
+        return "Session Code"
 
 
 class AttendanceSessionSerializer(serializers.ModelSerializer):
@@ -45,14 +50,26 @@ class AttendanceSessionSerializer(serializers.ModelSerializer):
     checkins = serializers.SerializerMethodField()
     students = AttendanceRecordSerializer(source='records', many=True, read_only=True)
     timeWindow = serializers.IntegerField(source='time_window_minutes')
+    expires_at = serializers.SerializerMethodField()
+    remaining_seconds = serializers.SerializerMethodField()
 
     class Meta:
         model = AttendanceSession
         fields = [
             'id', 'course', 'courseCode', 'courseName', 'group', 'group_name', 'group_display',
             'host_name', 'host_role', 'latitude', 'longitude', 'allowed_radius',
-            'date', 'checkins', 'status', 'timeWindow', 'students', 'qr_data'
+            'date', 'checkins', 'status', 'timeWindow', 'expires_at', 'remaining_seconds',
+            'students', 'qr_data'
         ]
+
+    def get_expires_at(self, obj):
+        if not obj.opened_at:
+            return None
+        expiry = obj.opened_at + timedelta(minutes=max(1, obj.time_window_minutes or 10))
+        return expiry.isoformat()
+
+    def get_remaining_seconds(self, obj):
+        return get_session_remaining_seconds(obj)
 
     def _should_hide_code(self, obj):
         return bool(self.context.get('hide_code') and obj.status == 'active')

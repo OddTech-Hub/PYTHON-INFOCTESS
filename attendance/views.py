@@ -11,6 +11,7 @@ from .models import AttendanceSession, AttendanceRecord, DeviceAlert
 from .serializers import AttendanceSessionSerializer, DeviceAlertSerializer
 from .utils import (
     validate_rotating_code,
+    close_expired_sessions,
     haversine_meters,
     get_session_host_info,
     assign_next_receipt_code,
@@ -21,6 +22,7 @@ class CreateSessionView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
+        close_expired_sessions()
         if request.user.role not in [User.Role.REP, User.Role.LECTURER]:
             return Response({
                 'success': False,
@@ -45,6 +47,12 @@ class CreateSessionView(APIView):
             session_lng = float(lng_raw) if lng_raw is not None and lng_raw != '' else None
         except (ValueError, TypeError):
             session_lat, session_lng = None, None
+
+        if session_lat is None or session_lng is None:
+            return Response({
+                'success': False,
+                'message': 'Classroom GPS location is required before starting a session. Please turn on Location/GPS in your browser and try again.'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         if not course_id:
             return Response({
@@ -199,10 +207,122 @@ class CloseSessionView(APIView):
         })
 
 
+class ExtendSessionView(APIView):
+    """Extends an active session's time window (e.g. +5 mins) cleanly."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, session_code):
+        close_expired_sessions()
+        if request.user.role not in [User.Role.REP, User.Role.LECTURER] and not request.user.is_staff:
+            return Response({'success': False, 'message': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        session = AttendanceSession.objects.filter(session_code=session_code).select_related('course', 'group', 'created_by').first()
+        if not session:
+            return Response({'success': False, 'message': 'Session not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if session.status != 'active':
+            return Response({'success': False, 'message': 'This session has already closed and cannot be extended.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if request.user.role == User.Role.REP and session.created_by != request.user:
+            return Response({'success': False, 'message': 'You can only extend sessions you created.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            extra_minutes = max(1, min(30, int(request.data.get('minutes', 5))))
+        except (ValueError, TypeError):
+            extra_minutes = 5
+
+        session.time_window_minutes = min(240, (session.time_window_minutes or 10) + extra_minutes)
+        session.save(update_fields=['time_window_minutes'])
+
+        serializer = AttendanceSessionSerializer(session)
+        return Response({
+            'success': True,
+            'message': f'Session extended by +{extra_minutes} minutes.',
+            'data': serializer.data
+        })
+
+
+class ManualMarkPresentView(APIView):
+    """Allows a Lecturer to manually mark a student present (e.g. phone GPS failure), logged transparently."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, session_code):
+        if request.user.role != User.Role.LECTURER and not request.user.is_staff:
+            return Response({
+                'success': False,
+                'message': 'Only Lecturers can manually mark a student present.'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        session = AttendanceSession.objects.filter(session_code=session_code).select_related('course', 'group').first()
+        if not session:
+            return Response({'success': False, 'message': 'Session not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        student_id = request.data.get('student_id')
+        index_number = str(request.data.get('index_number') or '').strip()
+
+        student = None
+        if student_id:
+            student = User.objects.filter(id=student_id).first()
+        if not student and index_number:
+            student = User.objects.filter(
+                models.Q(index_number__iexact=index_number) |
+                models.Q(email__iexact=index_number) |
+                models.Q(username__iexact=index_number)
+            ).first()
+
+        if not student:
+            return Response({'success': False, 'message': 'Student not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        existing = AttendanceRecord.objects.filter(session=session, student=student).first()
+        if existing:
+            if existing.status == 'flagged':
+                if not existing.receipt_code:
+                    existing.receipt_code = assign_next_receipt_code(session, student)
+                existing.status = 'confirmed'
+                existing.save(update_fields=['status', 'receipt_code'])
+                DeviceAlert.objects.filter(student=student, session=session, status='open').update(status='confirmed')
+            return Response({
+                'success': True,
+                'message': f'{student.first_name} {student.last_name} is marked Present ({existing.receipt_code}).',
+                'data': {
+                    'name': f"{student.first_name} {student.last_name}".strip(),
+                    'index': student.index_number,
+                    'receipt_code': existing.receipt_code,
+                    'method': 'Manual (Lecturer)',
+                    'status': 'confirmed'
+                }
+            })
+
+        lec_label = f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username
+        receipt_code = assign_next_receipt_code(session, student)
+        record = AttendanceRecord.objects.create(
+            session=session,
+            student=student,
+            method='manual_lecturer',
+            status='confirmed',
+            device_id='manual-lecturer',
+            device_name=f"Manual by {lec_label}"[:100],
+            receipt_code=receipt_code
+        )
+        return Response({
+            'success': True,
+            'message': f'Manually marked {student.first_name} {student.last_name} Present ({receipt_code}).',
+            'data': {
+                'id': record.id,
+                'name': f"{student.first_name} {student.last_name}".strip(),
+                'index': student.index_number,
+                'time': record.checked_in_at.strftime('%I:%M:%S %p'),
+                'receipt_code': receipt_code,
+                'method': 'Manual (Lecturer)',
+                'status': 'confirmed'
+            }
+        })
+
+
 class SessionListView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
+        close_expired_sessions()
         created_by_me = request.query_params.get('created_by')
         level_id = request.query_params.get('level_id')
         course_id = request.query_params.get('course_id')
@@ -249,6 +369,7 @@ class SessionDetailView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, session_code):
+        close_expired_sessions()
         try:
             session = AttendanceSession.objects.get(session_code=session_code)
         except AttendanceSession.DoesNotExist:
@@ -299,6 +420,7 @@ class CheckinView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
+        close_expired_sessions()
         session_code_raw = request.data.get('session_code', '')
         student_index = request.data.get('index_number')
         method = request.data.get('method', 'session_code')
@@ -381,20 +503,19 @@ class CheckinView(APIView):
 
         host_display, host_role = get_session_host_info(session)
 
-        # Enforce classroom geofencing if the session recorded classroom GPS coordinates
+        # Enforce STRICT classroom geofencing distance set by session creator (no inflated buffer)
         if session.latitude is not None and session.longitude is not None:
             if student_lat is None or student_lng is None:
                 return Response({
                     'success': False,
-                    'message': 'Location access is required to verify you are inside the classroom. Please allow GPS access and try again.'
+                    'message': 'Location access is required to verify you are in the lecture hall. Please enable GPS and try again.'
                 }, status=status.HTTP_403_FORBIDDEN)
             dist_m = haversine_meters(session.latitude, session.longitude, student_lat, student_lng)
-            indoor_tolerance = min(max(gps_accuracy, 0.0), 30.0)
-            allowed_m = (session.allowed_radius or 50) + indoor_tolerance
+            allowed_m = float(session.allowed_radius or 50)
             if dist_m > allowed_m:
                 return Response({
                     'success': False,
-                    'message': f"Outside classroom geofence ({int(round(dist_m))}m from classroom; max allowed {session.allowed_radius or 50}m)."
+                    'message': f"You are not in the lecture hall ({int(round(dist_m))}m away; allowed radius is {int(allowed_m)}m). Please go there to check in."
                 }, status=status.HTTP_403_FORBIDDEN)
 
         # Check duplicate check-in

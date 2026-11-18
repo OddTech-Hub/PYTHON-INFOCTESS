@@ -11,7 +11,7 @@ from courses.models import Course, StudentGroup, CourseRep
 from courses.helpers import get_user_rep_group_ids, get_user_rep_course_ids, get_rep_scope_q
 from accounts.models import User
 from attendance.models import AttendanceSession, AttendanceRecord, DeviceAlert
-from attendance.utils import get_session_host_info
+from attendance.utils import get_session_host_info, close_expired_sessions
 
 
 def _group_label(g):
@@ -36,6 +36,7 @@ class LevelSummaryView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, level_code):
+        close_expired_sessions()
         try:
             level = Level.objects.get(code=level_code)
         except Level.DoesNotExist:
@@ -414,6 +415,7 @@ class CourseBreakdownView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
+        close_expired_sessions()
         level_code = request.query_params.get('level_code')
         course_code = request.query_params.get('course_code')
         group_name = request.query_params.get('group_name')
@@ -487,7 +489,13 @@ class CourseBreakdownView(APIView):
 
         course = None
         if course_code:
-            course = Course.objects.filter(code=course_code, level=level).first()
+            course = Course.objects.filter(code__iexact=course_code, level=level).first() or Course.objects.filter(code__iexact=course_code).first()
+            if course and not group_name:
+                course_groups = scoped_groups.filter(course=course)
+                scoped_groups = course_groups
+                students = students.filter(
+                    models.Q(group__in=course_groups) | models.Q(enrolled_groups__in=course_groups)
+                ).distinct()
 
         # Serialize students with their attendance for this specific course or level (bulk pre-fetched)
         data = []
@@ -564,9 +572,40 @@ class CourseBreakdownView(APIView):
             s_group_ids = student_group_ids_map.get(s.id, [])
             s_groups = [scoped_group_by_id[gid] for gid in s_group_ids if gid in scoped_group_by_id]
             if selected_group_ids is not None:
-                sess_group_ids = selected_group_ids
+                sess_group_ids = [gid for gid in selected_group_ids if gid in s_group_ids] or selected_group_ids
             else:
                 sess_group_ids = s_group_ids if s_group_ids else ([s.group_id] if s.group_id else [])
+
+            # Per-group and per-course stats so new courses/groups NEVER inherit other courses' session totals
+            group_stats_map = {}
+            course_stats_acc = {}
+            for sg in s_groups:
+                g_tot = session_counts_by_group.get(sg.id, 0)
+                g_att = attended_by_student_group.get((s.id, sg.id), 0)
+                g_pct = min(100, int((g_att / g_tot) * 100)) if g_tot > 0 else 0
+                g_lbl = _group_label(sg)
+                c_code_str = sg.course.code if sg.course else ''
+                group_stats_map[g_lbl] = {
+                    'attended': g_att,
+                    'total': g_tot,
+                    'pct': g_pct,
+                    'has_sessions': g_tot > 0,
+                    'course_code': c_code_str
+                }
+                if c_code_str:
+                    acc = course_stats_acc.setdefault(c_code_str, {'attended': 0, 'total': 0})
+                    acc['attended'] += g_att
+                    acc['total'] += g_tot
+
+            course_stats_map = {
+                cc: {
+                    'attended': v['attended'],
+                    'total': v['total'],
+                    'pct': min(100, int((v['attended'] / v['total']) * 100)) if v['total'] > 0 else 0,
+                    'has_sessions': v['total'] > 0
+                }
+                for cc, v in course_stats_acc.items()
+            }
 
             total_sessions = sum(session_counts_by_group.get(gid, 0) for gid in sess_group_ids)
             attended = sum(attended_by_student_group.get((s.id, gid), 0) for gid in sess_group_ids)
@@ -584,6 +623,8 @@ class CourseBreakdownView(APIView):
                 'total': total_sessions,
                 'pct': rate,
                 'has_sessions': total_sessions > 0,
+                'group_stats': group_stats_map,
+                'course_stats': course_stats_map,
                 'device': s.device_name or "Not Registered",
                 'deviceId': s.device_id,
                 'flagged': alert is not None,
@@ -606,6 +647,7 @@ class CSVExportView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
+        close_expired_sessions()
         level_code = request.query_params.get('level_code')
         course_code = request.query_params.get('course_code')
         group_name = request.query_params.get('group_name')

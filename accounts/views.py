@@ -456,42 +456,46 @@ def _read_spreadsheet_rows(uploaded_file):
         return [[_normalize_cell(c) for c in row] for row in reader if row and any(_normalize_cell(c) for c in row)]
 
     if raw_bytes[:4] == b'PK\x03\x04':
+        import zipfile
         try:
-            return read_xlsx()
-        except Exception:
-            pass
+            with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
+                names = set(zf.namelist())
+                if any(n.startswith('word/') for n in names):
+                    raise ValueError('Word documents (.docx) cannot be imported. Please upload an Excel (.xlsx/.xls) or CSV (.csv) student roster.')
+                if 'xl/workbook.xml' not in names:
+                    raise ValueError('Invalid Excel archive. Please upload a valid Excel (.xlsx) or CSV (.csv) student roster.')
+        except zipfile.BadZipFile:
+            raise ValueError('Corrupted or unreadable Office file. Please upload a valid .xlsx, .xls, or .csv roster.')
+        return read_xlsx()
+
     if raw_bytes[:4] == b'\xd0\xcf\x11\xe0':
+        if filename.endswith('.doc'):
+            raise ValueError('Word documents (.doc) cannot be imported. Please upload an Excel (.xlsx/.xls) or CSV (.csv) student roster.')
         try:
             return read_xls()
         except Exception:
-            pass
+            raise ValueError('This binary file is not a valid Excel (.xls) workbook. Word files and unrelated documents are not allowed.')
 
-    if filename.endswith(('.xlsx', '.xlsm', '.xltx', '.xltm')):
-        try:
-            return read_xlsx()
-        except Exception:
-            return read_csv_or_text()
+    if filename.endswith('.xlsx'):
+        return read_xlsx()
 
     if filename.endswith('.xls'):
-        try:
-            return read_xls()
-        except Exception:
-            text = _decode_text_bytes(raw_bytes)
-            low = text.lower()
-            if '<tr' in low:
-                html_rows = _parse_html_table_rows(text)
-                if html_rows:
-                    return html_rows
-            if '<row' in low:
-                try:
-                    xml_rows = _parse_spreadsheetml_rows(raw_bytes)
-                    if xml_rows:
-                        return xml_rows
-                except Exception:
-                    pass
-            return read_csv_or_text()
+        text = _decode_text_bytes(raw_bytes)
+        low = text.lower()
+        if '<table' in low and '<tr' in low:
+            html_rows = _parse_html_table_rows(text)
+            if html_rows:
+                return html_rows
+        if '<?xml' in low and '<row' in low:
+            xml_rows = _parse_spreadsheetml_rows(raw_bytes)
+            if xml_rows:
+                return xml_rows
+        return read_xls()
 
-    return read_csv_or_text()
+    if filename.endswith('.csv'):
+        return read_csv_or_text()
+
+    raise ValueError('Unsupported file format. Only .csv, .xlsx, and .xls student roster spreadsheets are accepted.')
 
 
 def _classify_header_token(h):
@@ -553,6 +557,14 @@ class StudentBulkImportView(APIView):
             return Response({
                 'success': False,
                 'message': 'CSV or Excel (.xlsx / .xls) file is required.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        import os as _os
+        filename_lower = _os.path.splitext((getattr(uploaded_file, 'name', '') or '').lower())[1]
+        if filename_lower not in ('.csv', '.xlsx', '.xls'):
+            return Response({
+                'success': False,
+                'message': f"Unsupported file '{getattr(uploaded_file, 'name', '')}'. Only student roster CSV (.csv) or Excel (.xlsx, .xls) files are allowed — Word documents and other files cannot be imported."
             }, status=status.HTTP_400_BAD_REQUEST)
 
         import re
@@ -689,6 +701,47 @@ class StudentBulkImportView(APIView):
 
             if not data_rows:
                 return Response({'success': False, 'message': 'No student data rows found in the uploaded file.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Enforce strict roster structure: BOTH Index Number AND Student Name are required (Email optional)
+            has_index_col = col_map['index'] is not None
+            has_name_col = (
+                col_map['full_name'] is not None or
+                col_map['first_name'] is not None or
+                col_map['last_name'] is not None
+            )
+            if not has_index_col or not has_name_col:
+                missing_parts = []
+                if not has_index_col:
+                    missing_parts.append('Index Number')
+                if not has_name_col:
+                    missing_parts.append('Student Name')
+                return Response({
+                    'success': False,
+                    'message': f"Invalid student roster file: Missing required column(s): {' & '.join(missing_parts)}. Unrelated Excel or Word documents cannot be imported."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Validate actual row content: ensure the mapped columns genuinely hold student index numbers & names
+            validation_sample = [r for r in data_rows if r and any(str(c).strip() for c in r)][:25]
+            valid_student_rows = 0
+            for sr in validation_sample:
+                s_idx = sr[col_map['index']].strip() if col_map['index'] < len(sr) else ''
+                if s_idx.endswith('.0') and s_idx[:-2].isdigit():
+                    s_idx = s_idx[:-2]
+                s_name = ''
+                if col_map['full_name'] is not None and col_map['full_name'] < len(sr):
+                    s_name = sr[col_map['full_name']].strip()
+                else:
+                    fn = sr[col_map['first_name']].strip() if (col_map['first_name'] is not None and col_map['first_name'] < len(sr)) else ''
+                    ln = sr[col_map['last_name']].strip() if (col_map['last_name'] is not None and col_map['last_name'] < len(sr)) else ''
+                    s_name = f"{fn} {ln}".strip()
+                if looks_like_index(s_idx) and looks_like_name(s_name):
+                    valid_student_rows += 1
+
+            if valid_student_rows == 0 or valid_student_rows < max(1, len(validation_sample) // 2):
+                return Response({
+                    'success': False,
+                    'message': 'Unrelated file rejected: Rows do not contain valid Student Index Numbers paired with Student Names.'
+                }, status=status.HTTP_400_BAD_REQUEST)
 
             def get_col(row_arr, key):
                 c_idx = col_map.get(key)
@@ -887,7 +940,7 @@ class StudentBulkImportView(APIView):
                         if (not user.last_name or user.last_name == (user.index_number or '')) and last_name:
                             user.last_name = last_name
                             changed = True
-                        if group_obj and user.group_id != group_obj.id:
+                        if group_obj and not user.group_id:
                             user.group = group_obj
                             changed = True
                         if changed and user.id:

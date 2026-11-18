@@ -536,6 +536,9 @@ class CourseRepView(APIView):
                 models.Q(course__lecturers__lecturer=request.user)
             ).distinct()
 
+        elif request.user.role == User.Role.REP:
+            queryset = queryset.filter(student=request.user)
+
         data = []
         for rep in queryset:
             data.append({
@@ -547,6 +550,7 @@ class CourseRepView(APIView):
                 'group_name': str(rep.group) if rep.group else "Group 1",
                 'level_code': rep.group.level.code if (rep.group and rep.group.level) else "L100",
                 'course_code': rep.course.code if rep.course else "All",
+                'course_name': rep.course.name if rep.course else "",
                 'created_by': f"{rep.created_by.first_name} {rep.created_by.last_name}".strip() if rep.created_by else "Admin"
             })
 

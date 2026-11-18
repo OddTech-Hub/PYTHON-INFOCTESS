@@ -1,7 +1,9 @@
 import math
 import re
 import time
+from datetime import timedelta
 from django.db import transaction
+from django.utils import timezone
 from accounts.models import User
 
 WINDOW_SECONDS = 90
@@ -88,6 +90,37 @@ def validate_rotating_code(submitted_code: str, base_session_code: str, now_ts: 
         f"ATT {prev_digits}",
     }
     return clean_sub in valid_options
+
+
+def close_expired_sessions(now=None) -> int:
+    """
+    Automatically closes any active AttendanceSession whose set time window
+    has elapsed (now >= opened_at + time_window_minutes).
+    """
+    from .models import AttendanceSession
+
+    current_time = now or timezone.now()
+    closed_count = 0
+    for sess in AttendanceSession.objects.filter(status='active').only('id', 'opened_at', 'time_window_minutes'):
+        if not sess.opened_at:
+            continue
+        expiry = sess.opened_at + timedelta(minutes=max(1, sess.time_window_minutes or 10))
+        if current_time >= expiry:
+            AttendanceSession.objects.filter(pk=sess.pk, status='active').update(
+                status='closed',
+                closed_at=expiry
+            )
+            closed_count += 1
+    return closed_count
+
+
+def get_session_remaining_seconds(session, now=None) -> int:
+    """Returns exact remaining seconds before a session expires."""
+    if not session or session.status != 'active' or not session.opened_at:
+        return 0
+    current_time = now or timezone.now()
+    expiry = session.opened_at + timedelta(minutes=max(1, session.time_window_minutes or 10))
+    return max(0, int((expiry - current_time).total_seconds()))
 
 
 def haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

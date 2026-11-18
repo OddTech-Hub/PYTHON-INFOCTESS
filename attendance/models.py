@@ -30,6 +30,7 @@ class AttendanceRecord(models.Model):
     METHOD_CHOICES = [
         ('qr_code', 'QR Code'),
         ('session_code', 'Session Code'),
+        ('manual_lecturer', 'Manual by Lecturer'),
     ]
     STATUS_CHOICES = [
         ('confirmed', 'Confirmed'),
