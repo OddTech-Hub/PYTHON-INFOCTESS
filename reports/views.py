@@ -1,6 +1,8 @@
 import csv
+from datetime import timedelta
 from django.db import models
 from django.http import HttpResponse
+from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
@@ -184,29 +186,48 @@ class LevelSummaryView(APIView):
             ):
                 attended_by_student_group[(row['student_id'], row['session__group_id'])] = row['cnt']
 
-        # Calculate student specific attendance rates without per-student SQL queries
+        # Calculate real student attendance rates across students who actually had sessions
         student_rates = []
+        active_student_count = 0
         low_attendance_count = 0
         perfect_attendance_count = 0
 
         for student in student_list:
             s_group_ids = student_groups_map.get(student.id) or set()
             if request.user.role == User.Role.LECTURER:
-                s_group_ids = {gid for gid in s_group_ids if gid in group_students_map} or set(ordered_group_ids)
+                s_group_ids = {gid for gid in s_group_ids if gid in group_students_map}
             total_sessions = sum(session_counts_by_group.get(gid, 0) for gid in s_group_ids) if s_group_ids else 0
-            if total_sessions == 0:
-                rate = 100
-            else:
+            if total_sessions > 0:
                 attended = sum(attended_by_student_group.get((student.id, gid), 0) for gid in s_group_ids)
-                rate = int((attended / total_sessions) * 100)
+                rate = min(100, int((attended / total_sessions) * 100))
+                student_rates.append(rate)
+                active_student_count += 1
+                if rate < 75:
+                    low_attendance_count += 1
+                if rate == 100:
+                    perfect_attendance_count += 1
 
-            student_rates.append(rate)
-            if rate < 75:
-                low_attendance_count += 1
-            if rate == 100:
-                perfect_attendance_count += 1
+        overall_avg = int(sum(student_rates) / len(student_rates)) if student_rates else 0
 
-        overall_avg = int(sum(student_rates) / len(student_rates)) if student_rates else 100
+        # Real 7-day weekly attendance calculation
+        week_cutoff = timezone.now() - timedelta(days=7)
+        weekly_sessions = list(
+            AttendanceSession.objects.filter(
+                group_id__in=relevant_group_ids,
+                opened_at__gte=week_cutoff
+            ).annotate(
+                confirmed_count=models.Count('records', filter=models.Q(records__status='confirmed'))
+            )
+        ) if relevant_group_ids else []
+        if weekly_sessions:
+            week_rates = []
+            for ws in weekly_sessions:
+                g_size = len(group_students_map.get(ws.group_id, set()))
+                if g_size > 0:
+                    week_rates.append(min(100, int((ws.confirmed_count / g_size) * 100)))
+            this_week_avg = int(sum(week_rates) / len(week_rates)) if week_rates else 0
+        else:
+            this_week_avg = 0
 
         # Unresolved device alerts in this level (scoped to this cohort)
         flagged_count = (
@@ -214,37 +235,89 @@ class LevelSummaryView(APIView):
             if student_ids else 0
         )
 
-        # Progress bars
-        student_total = len(student_list)
+        # Progress bars (0% when no sessions held yet — never fake 100%)
         progress = [
             { 'label': "Overall Attendance", 'value': overall_avg, 'color': "#3b82f6" },
-            { 'label': "This Week", 'value': overall_avg if student_total > 0 else 100, 'color': "#10b981" },
-            { 'label': "Below 75%", 'value': int((low_attendance_count / student_total * 100)) if student_total > 0 else 0, 'color': "#ef4444", 'raw': f"{low_attendance_count} students" },
-            { 'label': "Perfect Attendance", 'value': int((perfect_attendance_count / student_total * 100)) if student_total > 0 else 0, 'color': "#f59e0b" },
+            { 'label': "This Week", 'value': this_week_avg, 'color': "#10b981" },
+            { 'label': "Below 75%", 'value': int((low_attendance_count / active_student_count * 100)) if active_student_count > 0 else 0, 'color': "#ef4444", 'raw': f"{low_attendance_count} students" },
+            { 'label': "Perfect Attendance", 'value': int((perfect_attendance_count / active_student_count * 100)) if active_student_count > 0 else 0, 'color': "#f59e0b" },
         ]
 
-        # Group pie chart data (computed in-memory)
+        # Group pie chart data (computed in-memory, 0% when 0 sessions held)
         colors = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444"]
         group_pie_data = []
         for i, g in enumerate(ordered_groups):
             g_student_ids = group_students_map.get(g.id, set())
             g_rates = []
             g_total_sessions = session_counts_by_group.get(g.id, 0)
-            for sid in g_student_ids:
-                if g_total_sessions == 0:
-                    rate = 100
-                else:
+            if g_total_sessions > 0:
+                for sid in g_student_ids:
                     attended = attended_by_student_group.get((sid, g.id), 0)
-                    rate = int((attended / g_total_sessions) * 100)
-                g_rates.append(rate)
+                    g_rates.append(min(100, int((attended / g_total_sessions) * 100)))
 
-            avg_rate = int(sum(g_rates) / len(g_rates)) if g_rates else 100
+            avg_rate = int(sum(g_rates) / len(g_rates)) if g_rates else 0
             group_pie_data.append({
                 'label': _group_label(g),
                 'value': len(g_student_ids),
                 'avg': avg_rate,
+                'sessions': g_total_sessions,
                 'color': colors[i % len(colors)]
             })
+
+        # Compute real per-course attendance averages and student per-course stats
+        course_ids_list = [c['id'] for c in courses_data]
+        course_stats_map = {}
+        if course_ids_list and relevant_group_ids:
+            c_sessions = list(
+                AttendanceSession.objects.filter(
+                    course_id__in=course_ids_list,
+                    group_id__in=relevant_group_ids
+                ).annotate(
+                    confirmed_count=models.Count('records', filter=models.Q(records__status='confirmed'))
+                )
+            )
+            my_confirmed_by_course = {}
+            if is_student or request.user.role == User.Role.REP:
+                my_confirmed_by_course = dict(
+                    AttendanceRecord.objects.filter(
+                        student=request.user,
+                        status='confirmed',
+                        session__course_id__in=course_ids_list,
+                        session__group_id__in=relevant_group_ids
+                    ).values('session__course_id').annotate(cnt=models.Count('id')).values_list('session__course_id', 'cnt')
+                )
+
+            c_sess_rates = {cid: [] for cid in course_ids_list}
+            c_sess_counts = {cid: 0 for cid in course_ids_list}
+            c_student_total = {cid: 0 for cid in course_ids_list}
+            my_group_set = set(student_groups_qs.values_list('id', flat=True)) if is_student else set(ordered_group_ids)
+            for cs in c_sessions:
+                c_sess_counts[cs.course_id] = c_sess_counts.get(cs.course_id, 0) + 1
+                g_size = len(group_students_map.get(cs.group_id, set()))
+                if g_size > 0:
+                    c_sess_rates[cs.course_id].append(min(100, int((cs.confirmed_count / g_size) * 100)))
+                if cs.group_id in my_group_set:
+                    c_student_total[cs.course_id] = c_student_total.get(cs.course_id, 0) + 1
+
+            for cid in course_ids_list:
+                r_list = c_sess_rates.get(cid, [])
+                s_tot = c_student_total.get(cid, 0)
+                s_att = my_confirmed_by_course.get(cid, 0)
+                course_stats_map[cid] = {
+                    'sessions_count': c_sess_counts.get(cid, 0),
+                    'avg_attendance': int(sum(r_list) / len(r_list)) if r_list else 0,
+                    'student_attended': s_att,
+                    'student_total': s_tot,
+                    'student_pct': min(100, int((s_att / s_tot) * 100)) if s_tot > 0 else 0,
+                }
+
+        for c_item in courses_data:
+            c_st = course_stats_map.get(c_item['id'], {})
+            c_item['sessions_count'] = c_st.get('sessions_count', 0)
+            c_item['avg_attendance'] = c_st.get('avg_attendance', 0)
+            c_item['attended'] = c_st.get('student_attended', 0)
+            c_item['total'] = c_st.get('student_total', 0)
+            c_item['pct'] = c_st.get('student_pct', 0)
 
         # Active & historical sessions for this level
         all_sessions = AttendanceSession.objects.filter(
@@ -497,7 +570,7 @@ class CourseBreakdownView(APIView):
 
             total_sessions = sum(session_counts_by_group.get(gid, 0) for gid in sess_group_ids)
             attended = sum(attended_by_student_group.get((s.id, gid), 0) for gid in sess_group_ids)
-            rate = int((attended / total_sessions) * 100) if total_sessions > 0 else 100
+            rate = min(100, int((attended / total_sessions) * 100)) if total_sessions > 0 else 0
 
             alert = alerts_by_student.get(s.id)
             group_labels = [_group_label(g) for g in s_groups]
@@ -510,6 +583,7 @@ class CourseBreakdownView(APIView):
                 'attended': attended,
                 'total': total_sessions,
                 'pct': rate,
+                'has_sessions': total_sessions > 0,
                 'device': s.device_name or "Not Registered",
                 'deviceId': s.device_id,
                 'flagged': alert is not None,
@@ -571,7 +645,7 @@ class CSVExportView(APIView):
                     records_query = records_query.filter(session__course=course)
 
                 attended = records_query.count()
-                rate = int((attended / total) * 100) if total > 0 else 100
+                rate = min(100, int((attended / total) * 100)) if total > 0 else 0
 
                 writer.writerow([
                     f"{s.first_name} {s.last_name}",
@@ -579,7 +653,7 @@ class CSVExportView(APIView):
                     s.group.name if s.group else "",
                     attended,
                     total,
-                    f"{rate}%"
+                    f"{rate}%" if total > 0 else "No Sessions"
                 ])
         except Exception as e:
             writer.writerow([f"Error generating report: {str(e)}"])

@@ -129,7 +129,7 @@ class DeviceAlertSerializer(serializers.ModelSerializer):
     def get_pct(self, obj):
         total_sessions = AttendanceSession.objects.filter(group=obj.student.group).count()
         if total_sessions == 0:
-            return 100
+            return 0
         attended_sessions = AttendanceRecord.objects.filter(student=obj.student, status='confirmed').count()
         return int((attended_sessions / total_sessions) * 100)
 
